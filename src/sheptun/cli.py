@@ -1,7 +1,10 @@
 import signal
 import sys
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
+
+if TYPE_CHECKING:
+    from PIL import Image
 
 import typer
 from rich.console import Console
@@ -210,70 +213,41 @@ def menubar(
     run_menubar(model_name=model_name)
 
 
-@app.command()
-def restart() -> None:
-    """Перезапустить menubar приложение."""
+def _kill_menubar_app() -> None:
     import subprocess
 
-    app_path = settings.app_path
-
-    # Закрываем приложение
     console.print("[yellow]Закрытие Sheptun...[/yellow]")
     subprocess.run(["pkill", "-f", "sheptun.menubar"], check=False)
 
-    # Запускаем заново
+
+def _launch_menubar_app() -> None:
+    import subprocess
+
     console.print("[yellow]Запуск Sheptun...[/yellow]")
-    subprocess.Popen(["open", str(app_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    console.print("[green]✓ Sheptun перезапущен[/green]")
+    subprocess.Popen(
+        ["open", str(settings.app_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
 
 
 @app.command()
-def install_app(
-    output: Annotated[
-        Path | None,
-        typer.Option(
-            "--output",
-            "-o",
-            help="Путь для установки приложения",
-        ),
-    ] = None,
-) -> None:
-    """Создать macOS приложение (.app) для menubar."""
-    import shutil
-    import stat
-    import subprocess
-    import sys
+def restart() -> None:
+    """Перезапустить menubar приложение."""
+    _kill_menubar_app()
+    _launch_menubar_app()
+    console.print("[green]✓ Sheptun перезапущен[/green]")
 
+
+def _preload_whisper_model() -> None:
     import whisper
-    from PIL import Image
 
-    # Загружаем модель Whisper заранее
     model_name = settings.model
     console.print(f"[yellow]Загрузка модели Whisper '{model_name}'...[/yellow]")
     whisper.load_model(model_name)
     console.print(f"[green]✓ Модель '{model_name}' загружена[/green]")
 
-    # Определяем пути
-    project_dir = Path(__file__).parent.parent.parent
-    venv_python = Path(sys.executable)
-    resources_dir = Path(__file__).parent / "resources"
 
-    # Создаём структуру .app
-    app_dir = output or settings.app_path
-    contents_dir = app_dir / "Contents"
-    macos_dir = contents_dir / "MacOS"
-    resources_app_dir = contents_dir / "Resources"
-    iconset_dir = resources_app_dir / "AppIcon.iconset"
-
-    if app_dir.exists():
-        shutil.rmtree(app_dir)
-
-    macos_dir.mkdir(parents=True)
-    iconset_dir.mkdir(parents=True)
-
-    # Info.plist
-    info_plist = contents_dir / "Info.plist"
-    info_plist.write_text(f"""\
+def _write_info_plist(path: Path) -> None:
+    path.write_text(f"""\
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -304,56 +278,97 @@ def install_app(
 </plist>
 """)
 
-    # Исполняемый скрипт
-    executable = macos_dir / "sheptun"
-    executable.write_text(f"""\
+
+def _write_executable(path: Path, project_dir: Path, venv_dir: Path) -> None:
+    import stat
+
+    path.write_text(f"""\
 #!/bin/bash
 cd "{project_dir}"
-source "{venv_python.parent.parent}/bin/activate"
+source "{venv_dir}/bin/activate"
 exec python -m sheptun.menubar
 """)
-    executable.chmod(executable.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
-    # Генерация иконок
-    icon_src = resources_dir / "microphone-idle.png"
-    if icon_src.exists():
-        img = Image.open(icon_src).convert("RGBA")
-        icon_ratio = 0.70
-        sizes = [16, 32, 64, 128, 256, 512]
 
-        for size in sizes:
-            # @1x
-            canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-            icon_size = int(size * icon_ratio)
-            offset = (size - icon_size) // 2
-            resized = img.resize((icon_size, icon_size), Image.Resampling.LANCZOS)
-            canvas.paste(resized, (offset, offset), resized)
-            canvas.save(iconset_dir / f"icon_{size}x{size}.png")
+def _generate_app_icons(icon_src: Path, iconset_dir: Path, output_icns: Path) -> None:
+    import shutil
+    import subprocess
 
-            # @2x
-            size2x = size * 2
-            if size2x <= 1024:
-                canvas2x = Image.new("RGBA", (size2x, size2x), (0, 0, 0, 0))
-                icon_size2x = int(size2x * icon_ratio)
-                offset2x = (size2x - icon_size2x) // 2
-                resized2x = img.resize((icon_size2x, icon_size2x), Image.Resampling.LANCZOS)
-                canvas2x.paste(resized2x, (offset2x, offset2x), resized2x)
-                canvas2x.save(iconset_dir / f"icon_{size}x{size}@2x.png")
+    from PIL import Image
 
-        # Конвертируем в .icns
-        subprocess.run(
-            [
-                "iconutil",
-                "-c",
-                "icns",
-                str(iconset_dir),
-                "-o",
-                str(resources_app_dir / "AppIcon.icns"),
-            ],
-            check=True,
-            capture_output=True,
-        )
-        shutil.rmtree(iconset_dir)
+    if not icon_src.exists():
+        return
+
+    img = Image.open(icon_src).convert("RGBA")
+    icon_padding_ratio = 0.70
+    sizes = [16, 32, 64, 128, 256, 512]
+
+    for size in sizes:
+        _save_icon(img, iconset_dir / f"icon_{size}x{size}.png", size, icon_padding_ratio)
+        retina_size = size * 2
+        if retina_size <= 1024:
+            _save_icon(img, iconset_dir / f"icon_{size}x{size}@2x.png", retina_size, icon_padding_ratio)
+
+    subprocess.run(
+        ["iconutil", "-c", "icns", str(iconset_dir), "-o", str(output_icns)],
+        check=True,
+        capture_output=True,
+    )
+    shutil.rmtree(iconset_dir)
+
+
+def _save_icon(img: "Image.Image", path: Path, size: int, padding_ratio: float) -> None:
+    from PIL import Image
+
+    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    icon_size = int(size * padding_ratio)
+    offset = (size - icon_size) // 2
+    resized = img.resize((icon_size, icon_size), Image.Resampling.LANCZOS)
+    canvas.paste(resized, (offset, offset), resized)
+    canvas.save(path)
+
+
+@app.command()
+def install_app(
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Путь для установки приложения",
+        ),
+    ] = None,
+) -> None:
+    """Создать macOS приложение (.app) для menubar."""
+    import shutil
+    import sys
+
+    _preload_whisper_model()
+
+    project_dir = Path(__file__).parent.parent.parent
+    venv_dir = Path(sys.executable).parent.parent
+    resources_dir = Path(__file__).parent / "resources"
+
+    app_dir = output or settings.app_path
+    contents_dir = app_dir / "Contents"
+    macos_dir = contents_dir / "MacOS"
+    resources_app_dir = contents_dir / "Resources"
+    iconset_dir = resources_app_dir / "AppIcon.iconset"
+
+    if app_dir.exists():
+        shutil.rmtree(app_dir)
+
+    macos_dir.mkdir(parents=True)
+    iconset_dir.mkdir(parents=True)
+
+    _write_info_plist(contents_dir / "Info.plist")
+    _write_executable(macos_dir / "sheptun", project_dir, venv_dir)
+    _generate_app_icons(
+        resources_dir / "microphone-idle.png",
+        iconset_dir,
+        resources_app_dir / "AppIcon.icns",
+    )
 
     console.print(f"[green]✓ Приложение создано: {app_dir}[/green]")
     console.print("[dim]Теперь можно запустить из Launchpad или Finder[/dim]")

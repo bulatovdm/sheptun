@@ -5,8 +5,6 @@ from typing import Any
 
 import Quartz
 
-# Quartz functions and constants - using getattr to avoid Pylance errors
-# for untyped module attributes
 CGEventCreateKeyboardEvent: Any = getattr(Quartz, "CGEventCreateKeyboardEvent")  # noqa: B009
 CGEventPost: Any = getattr(Quartz, "CGEventPost")  # noqa: B009
 CGEventSetFlags: Any = getattr(Quartz, "CGEventSetFlags")  # noqa: B009

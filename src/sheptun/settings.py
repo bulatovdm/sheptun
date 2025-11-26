@@ -6,7 +6,6 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Load .env file if exists
 load_dotenv()
 
 
@@ -33,21 +32,14 @@ def _get_optional_str(key: str) -> str | None:
 
 @dataclass(frozen=True)
 class Settings:
-    # Whisper model
     model: str = _get_str("SHEPTUN_MODEL", "base")
     device: str | None = _get_optional_str("SHEPTUN_DEVICE")
-
-    # Voice Activity Detection
     energy_threshold: float = _get_float("SHEPTUN_ENERGY_THRESHOLD", 0.01)
     silence_duration: float = _get_float("SHEPTUN_SILENCE_DURATION", 0.5)
     min_speech_duration: float = _get_float("SHEPTUN_MIN_SPEECH_DURATION", 0.2)
     max_speech_duration: float = _get_float("SHEPTUN_MAX_SPEECH_DURATION", 30.0)
-
-    # Debug
     debug: bool = _get_bool("SHEPTUN_DEBUG", False)
     log_file: Path = Path(_get_str("SHEPTUN_LOG_FILE", "logs/sheptun.log"))
-
-    # macOS app
     app_path: Path = Path(_get_str("SHEPTUN_APP_PATH", "/Applications/Sheptun.app"))
 
 
