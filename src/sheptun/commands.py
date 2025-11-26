@@ -116,14 +116,12 @@ class CommandParser:
         return cleaned.lower().strip()
 
     def _try_parse_stop(self, normalized: str) -> Action | None:
-        words = set(normalized.split())
-        if words & self._config.stop_commands:
+        if normalized in self._config.stop_commands:
             return Action(action_type=ActionType.STOP, value="")
         return None
 
     def _try_parse_help(self, normalized: str) -> Action | None:
-        words = set(normalized.split())
-        if words & self._config.help_commands:
+        if normalized in self._config.help_commands:
             return Action(action_type=ActionType.HELP, value="")
         return None
 
