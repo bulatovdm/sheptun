@@ -280,12 +280,15 @@ def cleanup_models(
         console.print(f"[green]✓ Удалена модель '{model}' ({size_mb:.0f} MB)[/green]")
         return
 
-    current_model_file = f"{current_model}.pt"
     deleted_count = 0
     total_size_mb = 0.0
 
+    def is_active_model(filename: str) -> bool:
+        name = filename.removesuffix(".pt")
+        return name == current_model or name.startswith(f"{current_model}-")
+
     for model_file in cache_dir.glob("*.pt"):
-        if model_file.name != current_model_file:
+        if not is_active_model(model_file.name):
             size_mb = model_file.stat().st_size / (1024 * 1024)
             model_file.unlink()
             console.print(f"[dim]Удалена: {model_file.name} ({size_mb:.0f} MB)[/dim]")
