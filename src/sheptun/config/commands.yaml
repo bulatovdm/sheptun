@@ -55,10 +55,9 @@ control_commands:
 
 # Stop commands (terminate listening)
 stop_commands:
-  - "стоп"
-  - "хватит"
-  - "остановись"
-  - "выход"
+  - "шептун стоп"
+  - "шептун хватит"
+  - "шептун выход"
 
 # Slash commands for Claude Code
 slash_commands:
@@ -80,6 +79,9 @@ slash_commands:
   "компакт": "/compact"
   # /memory
   "память": "/memory"
+  "мэмори": "/memory"
+  # /context
+  "контекст": "/context"
   # /config
   "конфиг": "/config"
   # /cost
@@ -107,11 +109,10 @@ slash_commands:
 
 # Help commands (show available commands)
 help_commands:
-  - "команды"
-  - "каманды"
-  - "помоги"
-  - "справка"
-  - "help"
+  - "шептун команды"
+  - "шептун справка"
+  - "шептун помощь"
+  - "шептун хелп"
 
 # Dictation prefixes (text after prefix is typed as-is)
 dictation_prefixes:

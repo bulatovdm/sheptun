@@ -101,6 +101,8 @@ module = [
     "rumps.*",
     "PIL.*",
     "AppKit.*",
+    "silero_vad.*",
+    "torch.*",
 ]
 ignore_missing_imports = true
 

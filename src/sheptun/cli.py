@@ -317,7 +317,8 @@ def list_models() -> None:
     for model_file in sorted(models):
         name = model_file.stem
         size_mb = model_file.stat().st_size / (1024 * 1024)
-        marker = " [green]← активная[/green]" if name == current_model else ""
+        is_active = name == current_model or name.startswith(f"{current_model}-")
+        marker = " [green]← активная[/green]" if is_active else ""
         console.print(f"  {name} ({size_mb:.0f} MB){marker}")
 
 
@@ -419,6 +420,7 @@ def install_app(
     import shutil
     import sys
 
+    _kill_menubar_app()
     _preload_whisper_model()
 
     project_dir = Path(__file__).parent.parent.parent

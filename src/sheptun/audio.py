@@ -1,10 +1,12 @@
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 import sounddevice as sd
+
+DEFAULT_BLOCKSIZE = 1024
 
 
 @dataclass
@@ -12,7 +14,7 @@ class AudioConfig:
     sample_rate: int = 16000
     channels: int = 1
     dtype: str = "int16"
-    blocksize: int = 1024
+    blocksize: int = DEFAULT_BLOCKSIZE
 
 
 class AudioRecorder:
@@ -97,14 +99,11 @@ class VoiceActivityConfig:
     max_speech_duration: float = 30.0
 
 
-@dataclass
-class VoiceActivityDetector:
-    config: VoiceActivityConfig = field(default_factory=VoiceActivityConfig)
-    _silence_samples: int = field(init=False, default=0)
-    _speech_samples: int = field(init=False, default=0)
-    _is_speaking: bool = field(init=False, default=False)
+class EnergyVAD:
+    """Energy-based Voice Activity Detector."""
 
-    def __post_init__(self) -> None:
+    def __init__(self, config: VoiceActivityConfig) -> None:
+        self.config = config
         self._silence_samples = 0
         self._speech_samples = 0
         self._is_speaking = False
@@ -140,14 +139,87 @@ class VoiceActivityDetector:
         return False
 
 
+class SileroVAD:
+    """Silero neural network Voice Activity Detector."""
+
+    def __init__(self, config: VoiceActivityConfig) -> None:
+        from silero_vad import load_silero_vad
+
+        self.config = config
+        self._model = load_silero_vad()
+        self._silence_samples = 0
+        self._speech_samples = 0
+        self._is_speaking = False
+
+    def reset(self) -> None:
+        self._model.reset_states()
+        self._silence_samples = 0
+        self._speech_samples = 0
+        self._is_speaking = False
+
+    def process_chunk(self, audio_chunk: bytes, sample_rate: int) -> bool:
+        import torch
+
+        audio_array = np.frombuffer(audio_chunk, dtype=np.int16).astype(np.float32) / 32768.0
+        audio_tensor = torch.from_numpy(audio_array)
+
+        speech_prob = self._model(audio_tensor, sample_rate).item()
+
+        if speech_prob > 0.5:
+            self._speech_samples += len(audio_array)
+            self._silence_samples = 0
+            self._is_speaking = True
+        else:
+            self._silence_samples += len(audio_array)
+
+        speech_duration = self._speech_samples / sample_rate
+        silence_duration = self._silence_samples / sample_rate
+
+        if speech_duration >= self.config.max_speech_duration:
+            return True
+
+        if not self._is_speaking:
+            return False
+
+        if silence_duration >= self.config.silence_duration:
+            return speech_duration >= self.config.min_speech_duration
+
+        return False
+
+
+SILERO_BLOCKSIZE = 512  # Silero VAD requires exactly 512 samples for 16kHz
+
+
+def get_vad_blocksize(vad_type: str) -> int:
+    """Return optimal audio blocksize for VAD type."""
+    if vad_type == "silero":
+        return SILERO_BLOCKSIZE
+    return DEFAULT_BLOCKSIZE
+
+
+def create_vad(config: VoiceActivityConfig, vad_type: str = "energy") -> EnergyVAD | SileroVAD:
+    """Create VAD instance based on configuration."""
+    if vad_type == "silero":
+        return SileroVAD(config)
+    return EnergyVAD(config)
+
+
 class ContinuousAudioRecorder:
     def __init__(
         self,
         audio_config: AudioConfig | None = None,
         vad_config: VoiceActivityConfig | None = None,
+        vad_type: str | None = None,
     ) -> None:
-        self._audio_config = audio_config or AudioConfig()
-        self._vad = VoiceActivityDetector(vad_config or _default_vad_config())
+        from sheptun.settings import settings
+
+        vad_type_to_use = vad_type if vad_type is not None else settings.vad_type
+
+        if audio_config is None:
+            audio_config = AudioConfig(blocksize=get_vad_blocksize(vad_type_to_use))
+
+        self._audio_config = audio_config
+        self._vad = create_vad(vad_config or _default_vad_config(), vad_type=vad_type_to_use)
         self._buffer: list[bytes] = []
         self._stream: sd.InputStream | None = None
         self._running = False
