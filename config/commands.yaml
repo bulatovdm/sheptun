@@ -1,0 +1,70 @@
+# Voice commands configuration for Sheptun
+# Format: trigger phrase -> action
+
+# Control commands (exact match)
+control_commands:
+  # Basic navigation
+  "клод": { type: "text", value: "claude" }
+  "таб": { type: "key", value: "tab" }
+  "шифт таб": { type: "hotkey", value: ["shift", "tab"] }
+  "энтер": { type: "key", value: "return" }
+  "эскейп": { type: "key", value: "escape" }
+  "пробел": { type: "key", value: "space" }
+
+  # Arrow keys
+  "вверх": { type: "key", value: "up" }
+  "вниз": { type: "key", value: "down" }
+  "влево": { type: "key", value: "left" }
+  "вправо": { type: "key", value: "right" }
+
+  # Editing
+  "удалить": { type: "key", value: "delete" }
+  "бэкспейс": { type: "key", value: "delete" }
+  "хоум": { type: "key", value: "home" }
+  "энд": { type: "key", value: "end" }
+
+  # Common hotkeys
+  "копировать": { type: "hotkey", value: ["command", "c"] }
+  "вставить": { type: "hotkey", value: ["command", "v"] }
+  "вырезать": { type: "hotkey", value: ["command", "x"] }
+  "отменить": { type: "hotkey", value: ["command", "z"] }
+  "сохранить": { type: "hotkey", value: ["command", "s"] }
+  "выделить всё": { type: "hotkey", value: ["command", "a"] }
+
+  # Control-key combinations
+  "контрол си": { type: "hotkey", value: ["control", "c"] }
+  "контрол зэт": { type: "hotkey", value: ["control", "z"] }
+
+# Stop commands (terminate listening)
+stop_commands:
+  - "стоп"
+  - "хватит"
+  - "остановись"
+  - "выход"
+
+# Slash commands for Claude Code
+slash_commands:
+  "модел": "/model"
+  "хелп": "/help"
+  "клир": "/clear"
+  "компакт": "/compact"
+  "память": "/memory"
+  "конфиг": "/config"
+  "кост": "/cost"
+  "доктор": "/doctor"
+  "инит": "/init"
+  "логин": "/login"
+  "логаут": "/logout"
+  "ревью": "/review"
+  "баг": "/bug"
+  "терминал": "/terminal"
+  "вим": "/vim"
+  "резюме": "/resume"
+  "pr-комментс": "/pr-comments"
+
+# Dictation prefixes (text after prefix is typed as-is)
+dictation_prefixes:
+  - "скажи"
+  - "введи"
+  - "напиши"
+  - "текст"
