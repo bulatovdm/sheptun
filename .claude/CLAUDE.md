@@ -56,3 +56,7 @@ Command config: `./sheptun.yaml` or `~/.config/sheptun/commands.yaml`
 - VAD (Voice Activity Detection) with energy threshold + silence duration
 - Quartz CGEventCreateKeyboardEvent for keyboard simulation
 - Settings loaded once at import via dotenv (restart needed for changes)
+
+## Git Commits
+
+Do not add Co-Authored-By or emoji badges to commit messages.
