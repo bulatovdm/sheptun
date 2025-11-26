@@ -245,6 +245,21 @@ def _preload_whisper_model() -> None:
     whisper.load_model(model_name)
     console.print(f"[green]✓ Модель '{model_name}' загружена[/green]")
 
+    _cleanup_unused_whisper_models(model_name)
+
+
+def _cleanup_unused_whisper_models(current_model: str) -> None:
+    cache_dir = Path.home() / ".cache" / "whisper"
+    if not cache_dir.exists():
+        return
+
+    current_model_file = f"{current_model}.pt"
+    for model_file in cache_dir.glob("*.pt"):
+        if model_file.name != current_model_file:
+            size_mb = model_file.stat().st_size / (1024 * 1024)
+            model_file.unlink()
+            console.print(f"[dim]Удалена неиспользуемая модель: {model_file.name} ({size_mb:.0f} MB)[/dim]")
+
 
 def _write_info_plist(path: Path) -> None:
     path.write_text(f"""\
