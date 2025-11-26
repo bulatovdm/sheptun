@@ -245,20 +245,80 @@ def _preload_whisper_model() -> None:
     whisper.load_model(model_name)
     console.print(f"[green]✓ Модель '{model_name}' загружена[/green]")
 
-    _cleanup_unused_whisper_models(model_name)
+
+def _get_whisper_cache_dir() -> Path:
+    return Path.home() / ".cache" / "whisper"
 
 
-def _cleanup_unused_whisper_models(current_model: str) -> None:
-    cache_dir = Path.home() / ".cache" / "whisper"
+@app.command()
+def cleanup_models(
+    model: Annotated[
+        str | None,
+        typer.Argument(help="Имя модели для удаления (или все неактивные если не указано)"),
+    ] = None,
+) -> None:
+    """Удалить модели Whisper."""
+    cache_dir = _get_whisper_cache_dir()
     if not cache_dir.exists():
+        console.print("[dim]Кэш моделей пуст[/dim]")
+        return
+
+    current_model = settings.model
+
+    if model:
+        if model == current_model:
+            console.print(f"[red]Нельзя удалить активную модель '{model}'[/red]")
+            raise typer.Exit(1)
+
+        model_file = cache_dir / f"{model}.pt"
+        if not model_file.exists():
+            console.print(f"[red]Модель '{model}' не найдена[/red]")
+            raise typer.Exit(1)
+
+        size_mb = model_file.stat().st_size / (1024 * 1024)
+        model_file.unlink()
+        console.print(f"[green]✓ Удалена модель '{model}' ({size_mb:.0f} MB)[/green]")
         return
 
     current_model_file = f"{current_model}.pt"
+    deleted_count = 0
+    total_size_mb = 0.0
+
     for model_file in cache_dir.glob("*.pt"):
         if model_file.name != current_model_file:
             size_mb = model_file.stat().st_size / (1024 * 1024)
             model_file.unlink()
-            console.print(f"[dim]Удалена неиспользуемая модель: {model_file.name} ({size_mb:.0f} MB)[/dim]")
+            console.print(f"[dim]Удалена: {model_file.name} ({size_mb:.0f} MB)[/dim]")
+            deleted_count += 1
+            total_size_mb += size_mb
+
+    if deleted_count == 0:
+        console.print("[green]Нет неиспользуемых моделей[/green]")
+    else:
+        console.print(f"[green]✓ Удалено {deleted_count} моделей ({total_size_mb:.0f} MB)[/green]")
+
+
+@app.command()
+def list_models() -> None:
+    """Показать загруженные модели Whisper."""
+    cache_dir = _get_whisper_cache_dir()
+    if not cache_dir.exists():
+        console.print("[dim]Кэш моделей пуст[/dim]")
+        return
+
+    current_model = settings.model
+    models = list(cache_dir.glob("*.pt"))
+
+    if not models:
+        console.print("[dim]Нет загруженных моделей[/dim]")
+        return
+
+    console.print("\n[bold]Загруженные модели:[/bold]")
+    for model_file in sorted(models):
+        name = model_file.stem
+        size_mb = model_file.stat().st_size / (1024 * 1024)
+        marker = " [green]← активная[/green]" if name == current_model else ""
+        console.print(f"  {name} ({size_mb:.0f} MB){marker}")
 
 
 def _write_info_plist(path: Path) -> None:
