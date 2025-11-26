@@ -4,17 +4,43 @@ import threading
 from typing import Any
 
 import rumps
+from pynput import keyboard
 
 from sheptun.audio import AudioConfig, VoiceActivityConfig
 from sheptun.commands import CommandConfigLoader, CommandParser
 from sheptun.config import get_config_path
 from sheptun.keyboard import MacOSKeyboardSender
 from sheptun.recognition import WhisperRecognizer
-from sheptun.settings import setup_logging
+from sheptun.settings import settings, setup_logging
 from sheptun.types import Action, ActionType
 
 setup_logging()
 logger = logging.getLogger("sheptun.menubar")
+
+
+def _parse_hotkey(hotkey_str: str) -> keyboard.HotKey | None:
+    """Parse hotkey string like '<cmd>+<shift>+m' into pynput HotKey."""
+    try:
+        keys = set()
+        for part in hotkey_str.split("+"):
+            part = part.strip().lower()
+            if part == "<cmd>":
+                keys.add(keyboard.Key.cmd)
+            elif part == "<shift>":
+                keys.add(keyboard.Key.shift)
+            elif part == "<ctrl>":
+                keys.add(keyboard.Key.ctrl)
+            elif part == "<alt>":
+                keys.add(keyboard.Key.alt)
+            elif len(part) == 1:
+                keys.add(keyboard.KeyCode.from_char(part))
+            else:
+                logger.warning(f"Unknown hotkey part: {part}")
+                return None
+        return keys
+    except Exception as e:
+        logger.warning(f"Failed to parse hotkey '{hotkey_str}': {e}")
+        return None
 
 
 def _get_icon_path(name: str) -> str:
@@ -165,19 +191,42 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         self._model_name = model_name
         self._engine: MenubarVoiceEngine | None = None
         self._is_listening = False
+        self._hotkey_listener: keyboard.Listener | None = None
+        self._hotkey_keys: set[Any] = _parse_hotkey(settings.hotkey) or set()
+        self._pressed_keys: set[Any] = set()
 
         self._icon_idle = _get_icon_path("mic_idle.png")
         self._icon_listening = _get_icon_path("mic_active.png")
         self._icon_processing = _get_icon_path("mic_processing.png")
 
         self.icon = self._icon_idle
-        self._start_menu_item = rumps.MenuItem("Начать слушать", callback=self._toggle_listening)
+        hotkey_display = settings.hotkey.replace("<cmd>", "⌘").replace("<shift>", "⇧").replace("<ctrl>", "⌃").replace("<alt>", "⌥").upper()
+        self._start_menu_item = rumps.MenuItem(f"Начать слушать ({hotkey_display})", callback=self._toggle_listening)
         self.menu = [
             self._start_menu_item,
             None,
             rumps.MenuItem("Перезапустить", callback=self._restart),
             rumps.MenuItem("Выход", callback=self._quit),
         ]
+        self._start_hotkey_listener()
+
+    def _start_hotkey_listener(self) -> None:
+        if not self._hotkey_keys:
+            logger.warning("No hotkey configured, skipping listener")
+            return
+
+        def on_press(key: Any) -> None:
+            self._pressed_keys.add(key)
+            if self._hotkey_keys.issubset(self._pressed_keys):
+                logger.info("Hotkey pressed, toggling listening")
+                self._toggle_listening(self._start_menu_item)
+
+        def on_release(key: Any) -> None:
+            self._pressed_keys.discard(key)
+
+        self._hotkey_listener = keyboard.Listener(on_press=on_press, on_release=on_release)
+        self._hotkey_listener.start()
+        logger.info(f"Hotkey listener started for {settings.hotkey}")
 
     def _init_engine(self) -> None:
         if self._engine is not None:
@@ -229,10 +278,10 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         import os
         import subprocess
 
-        from sheptun.settings import settings
-
         if self._engine is not None:
             self._engine.stop()
+        if self._hotkey_listener is not None:
+            self._hotkey_listener.stop()
 
         app_path = settings.app_path
         subprocess.Popen(["open", str(app_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -241,6 +290,8 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
     def _quit(self, _: Any) -> None:
         if self._engine is not None:
             self._engine.stop()
+        if self._hotkey_listener is not None:
+            self._hotkey_listener.stop()
         rumps.quit_application()  # type: ignore[no-untyped-call]
 
 
