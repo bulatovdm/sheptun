@@ -29,6 +29,8 @@ sheptun restart             # Перезапустить приложение
 
 После установки Sheptun появится в menubar. Приложение работает в фоне без терминала.
 
+**Горячая клавиша:** `Ctrl+Option+S` — включить/выключить запись.
+
 ## Конфигурация
 
 Создайте файл `.env` в корне проекта или настройте переменные окружения:
@@ -38,6 +40,7 @@ SHEPTUN_MODEL=medium              # Модель: tiny, base, small, medium, lar
 SHEPTUN_DEVICE=                   # Устройство: cpu, cuda, mps (auto если пусто)
 SHEPTUN_SILENCE_DURATION=0.3      # Пауза для определения конца фразы (сек)
 SHEPTUN_DEBUG=false               # Включить логирование
+SHEPTUN_HOTKEY=<ctrl>+<alt>+s     # Горячая клавиша для menubar
 ```
 
 ## Голосовые команды
