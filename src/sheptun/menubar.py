@@ -18,10 +18,10 @@ setup_logging()
 logger = logging.getLogger("sheptun.menubar")
 
 
-def _parse_hotkey(hotkey_str: str) -> keyboard.HotKey | None:
-    """Parse hotkey string like '<cmd>+<shift>+m' into pynput HotKey."""
+def _parse_hotkey(hotkey_str: str) -> set[Any] | None:
+    """Parse hotkey string like '<cmd>+<shift>+m' into set of keys."""
     try:
-        keys = set()
+        keys: set[Any] = set()
         for part in hotkey_str.split("+"):
             part = part.strip().lower()
             if part == "<cmd>":
