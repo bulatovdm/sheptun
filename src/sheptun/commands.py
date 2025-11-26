@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -6,6 +7,8 @@ import yaml
 
 from sheptun.types import Action, ActionType
 
+PUNCTUATION_PATTERN = re.compile(r"[^\w\s]", re.UNICODE)
+
 
 @dataclass
 class CommandConfig:
@@ -13,6 +16,7 @@ class CommandConfig:
     stop_commands: set[str] = field(default_factory=set)
     slash_commands: dict[str, str] = field(default_factory=dict)
     dictation_prefixes: list[str] = field(default_factory=list)
+    help_commands: set[str] = field(default_factory=set)
 
 
 class CommandConfigLoader:
@@ -31,12 +35,14 @@ class CommandConfigLoader:
         stop_commands = set(raw_config.get("stop_commands", []))
         slash_commands = raw_config.get("slash_commands", {})
         dictation_prefixes = raw_config.get("dictation_prefixes", [])
+        help_commands = set(raw_config.get("help_commands", []))
 
         return CommandConfig(
             control_commands=control_commands,
             stop_commands=stop_commands,
             slash_commands=slash_commands,
             dictation_prefixes=dictation_prefixes,
+            help_commands=help_commands,
         )
 
     @staticmethod
@@ -87,6 +93,10 @@ class CommandParser:
         if stop_action is not None:
             return stop_action
 
+        help_action = self._try_parse_help(normalized)
+        if help_action is not None:
+            return help_action
+
         control_action = self._try_parse_control(normalized)
         if control_action is not None:
             return control_action
@@ -102,27 +112,44 @@ class CommandParser:
         return Action(action_type=ActionType.TEXT, value=text.strip())
 
     def _normalize_text(self, text: str) -> str:
-        return text.lower().strip()
+        cleaned = PUNCTUATION_PATTERN.sub("", text)
+        return cleaned.lower().strip()
 
     def _try_parse_stop(self, normalized: str) -> Action | None:
-        if normalized in self._config.stop_commands:
+        words = set(normalized.split())
+        if words & self._config.stop_commands:
             return Action(action_type=ActionType.STOP, value="")
+        return None
+
+    def _try_parse_help(self, normalized: str) -> Action | None:
+        words = set(normalized.split())
+        if words & self._config.help_commands:
+            return Action(action_type=ActionType.HELP, value="")
         return None
 
     def _try_parse_control(self, normalized: str) -> Action | None:
         return self._config.control_commands.get(normalized)
 
     def _try_parse_slash(self, normalized: str) -> Action | None:
-        if not normalized.startswith("слэш "):
-            return None
+        slash_prefixes = ("слэш ", "слышь ", "слеш ")
+        command_part: str | None = None
 
-        command_part = normalized[5:].strip()
-        slash_value = self._config.slash_commands.get(command_part)
+        for prefix in slash_prefixes:
+            if normalized.startswith(prefix):
+                command_part = normalized[len(prefix):].strip()
+                break
 
+        if command_part is not None:
+            slash_value = self._config.slash_commands.get(command_part)
+            if slash_value is not None:
+                return Action(action_type=ActionType.SLASH, value=slash_value)
+            return Action(action_type=ActionType.SLASH, value=f"/{command_part}")
+
+        slash_value = self._config.slash_commands.get(normalized)
         if slash_value is not None:
             return Action(action_type=ActionType.SLASH, value=slash_value)
 
-        return Action(action_type=ActionType.SLASH, value=f"/{command_part}")
+        return None
 
     def _try_parse_dictation(self, normalized: str) -> Action | None:
         for prefix in self._config.dictation_prefixes:

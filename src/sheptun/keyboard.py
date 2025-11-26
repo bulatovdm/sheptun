@@ -1,15 +1,20 @@
+import subprocess
 import time
 from dataclasses import dataclass
+from typing import Any
 
-from Quartz import (
-    CGEventCreateKeyboardEvent,
-    CGEventPost,
-    CGEventSetFlags,
-    kCGEventFlagMaskCommand,
-    kCGEventFlagMaskControl,
-    kCGEventFlagMaskShift,
-    kCGHIDEventTap,
-)
+import Quartz  # type: ignore[import-untyped]
+
+# Quartz functions and constants - using getattr to avoid Pylance errors
+# for untyped module attributes
+CGEventCreateKeyboardEvent: Any = getattr(Quartz, "CGEventCreateKeyboardEvent")
+CGEventPost: Any = getattr(Quartz, "CGEventPost")
+CGEventSetFlags: Any = getattr(Quartz, "CGEventSetFlags")
+kCGEventFlagMaskAlternate: int = getattr(Quartz, "kCGEventFlagMaskAlternate")
+kCGEventFlagMaskCommand: int = getattr(Quartz, "kCGEventFlagMaskCommand")
+kCGEventFlagMaskControl: int = getattr(Quartz, "kCGEventFlagMaskControl")
+kCGEventFlagMaskShift: int = getattr(Quartz, "kCGEventFlagMaskShift")
+kCGHIDEventTap: Any = getattr(Quartz, "kCGHIDEventTap")
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +128,8 @@ MODIFIER_FLAGS: dict[str, int] = {
     "ctrl": kCGEventFlagMaskControl,
     "command": kCGEventFlagMaskCommand,
     "cmd": kCGEventFlagMaskCommand,
+    "option": kCGEventFlagMaskAlternate,
+    "alt": kCGEventFlagMaskAlternate,
 }
 
 
@@ -131,9 +138,29 @@ class MacOSKeyboardSender:
         self._key_delay = key_delay
 
     def send_text(self, text: str) -> None:
-        for char in text:
-            self._send_character(char)
-            time.sleep(self._key_delay)
+        old_clipboard = self._get_clipboard()
+        self._set_clipboard(text)
+        self.send_hotkey(["command", "v"])
+        time.sleep(0.05)
+        if old_clipboard:
+            self._set_clipboard(old_clipboard)
+
+    def _get_clipboard(self) -> str:
+        result = subprocess.run(
+            ["pbpaste"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return result.stdout
+
+    def _set_clipboard(self, text: str) -> None:
+        subprocess.run(
+            ["pbcopy"],
+            input=text,
+            text=True,
+            check=False,
+        )
 
     def send_key(self, key: str) -> None:
         key_lower = key.lower()

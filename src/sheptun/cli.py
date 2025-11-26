@@ -1,3 +1,4 @@
+import logging
 import signal
 import sys
 from pathlib import Path
@@ -7,7 +8,10 @@ import typer
 from rich.console import Console
 
 from sheptun import __version__
+from sheptun.config import get_config_path
 from sheptun.engine import VoiceEngine
+
+LOG_FILE = Path.cwd() / "logs" / "sheptun.log"
 
 app = typer.Typer(
     name="sheptun",
@@ -17,26 +21,16 @@ app = typer.Typer(
 
 console = Console()
 
-DEFAULT_CONFIG_PATH = Path(__file__).parent.parent.parent.parent / "config" / "commands.yaml"
 
-
-def get_config_path(config: Path | None) -> Path:
-    if config is not None:
-        return config
-
-    local_config = Path.cwd() / "sheptun.yaml"
-    if local_config.exists():
-        return local_config
-
-    user_config = Path.home() / ".config" / "sheptun" / "commands.yaml"
-    if user_config.exists():
-        return user_config
-
-    if DEFAULT_CONFIG_PATH.exists():
-        return DEFAULT_CONFIG_PATH
-
-    console.print("[red]Конфигурационный файл не найден[/red]")
-    raise typer.Exit(1)
+def setup_debug_logging() -> None:
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler(LOG_FILE, encoding="utf-8"),
+        ],
+    )
 
 
 @app.command()
@@ -75,11 +69,23 @@ def listen(
             help="Использовать простой вывод статуса",
         ),
     ] = False,
+    debug: Annotated[
+        bool,
+        typer.Option(
+            "--debug",
+            help="Выводить отладочную информацию",
+        ),
+    ] = False,
 ) -> None:
     """Запустить прослушивание голосовых команд."""
+    if debug:
+        setup_debug_logging()
+
     config_path = get_config_path(config)
     console.print(f"[dim]Конфигурация: {config_path}[/dim]")
     console.print(f"[dim]Модель: {model}[/dim]")
+    if debug:
+        console.print(f"[dim]Лог: {LOG_FILE}[/dim]")
 
     console.print("[yellow]Загрузка модели Whisper...[/yellow]")
 
@@ -87,7 +93,8 @@ def listen(
         config_path=config_path,
         model_name=model,
         device=device,
-        use_live_status=not simple_status,
+        use_live_status=not simple_status and not debug,
+        debug=debug,
     )
 
     def signal_handler(_signum: int, _frame: object) -> None:
@@ -191,6 +198,24 @@ def list_commands(
     console.print("\n[bold]Префиксы диктовки:[/bold]")
     for prefix in command_config.dictation_prefixes:
         console.print(f"  [green]{prefix}[/green] <текст>")
+
+
+@app.command()
+def menubar(
+    model: Annotated[
+        str,
+        typer.Option(
+            "--model",
+            "-m",
+            help="Модель Whisper (tiny, base, small, medium, large)",
+        ),
+    ] = "base",
+) -> None:
+    """Запустить как menubar приложение."""
+    from sheptun.menubar import run_menubar
+
+    console.print("[yellow]Запуск menubar приложения...[/yellow]")
+    run_menubar(model_name=model)
 
 
 if __name__ == "__main__":

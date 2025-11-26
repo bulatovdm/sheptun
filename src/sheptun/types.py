@@ -9,6 +9,7 @@ class ActionType(Enum):
     HOTKEY = auto()
     STOP = auto()
     SLASH = auto()
+    HELP = auto()
 
 
 @dataclass(frozen=True, slots=True)

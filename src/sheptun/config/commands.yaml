@@ -6,20 +6,38 @@ control_commands:
   # Basic navigation
   "клод": { type: "text", value: "claude" }
   "таб": { type: "key", value: "tab" }
+  "tab": { type: "key", value: "tab" }
   "шифт таб": { type: "hotkey", value: ["shift", "tab"] }
   "энтер": { type: "key", value: "return" }
+  "enter": { type: "key", value: "return" }
+  "ввод": { type: "key", value: "return" }
   "эскейп": { type: "key", value: "escape" }
+  "escape": { type: "key", value: "escape" }
   "пробел": { type: "key", value: "space" }
+  "space": { type: "key", value: "space" }
 
   # Arrow keys
   "вверх": { type: "key", value: "up" }
+  "верх": { type: "key", value: "up" }
+  "наверх": { type: "key", value: "up" }
+  "вниз": { type: "key", value: "down" }
+  "низ": { type: "key", value: "down" }
   "вниз": { type: "key", value: "down" }
   "влево": { type: "key", value: "left" }
+  "лево": { type: "key", value: "left" }
+  "налево": { type: "key", value: "left" }
   "вправо": { type: "key", value: "right" }
+  "право": { type: "key", value: "right" }
+  "направо": { type: "key", value: "right" }
 
   # Editing
   "удалить": { type: "key", value: "delete" }
+  "удали": { type: "key", value: "delete" }
+  "delete": { type: "key", value: "delete" }
   "бэкспейс": { type: "key", value: "delete" }
+  "backspace": { type: "key", value: "delete" }
+  "удали слово": { type: "hotkey", value: ["option", "delete"] }
+  "удали строку": { type: "hotkey", value: ["command", "delete"] }
   "хоум": { type: "key", value: "home" }
   "энд": { type: "key", value: "end" }
 
@@ -44,23 +62,55 @@ stop_commands:
 
 # Slash commands for Claude Code
 slash_commands:
+  # /model
   "модел": "/model"
+  "модель": "/model"
+  # /help
   "хелп": "/help"
+  "помощь": "/help"
+  # /clear
   "клир": "/clear"
+  "клер": "/clear"
+  "клиру": "/clear"
+  "клира": "/clear"
+  "клеар": "/clear"
+  "очистить": "/clear"
+  "очисти": "/clear"
+  # /compact
   "компакт": "/compact"
+  # /memory
   "память": "/memory"
+  # /config
   "конфиг": "/config"
+  # /cost
   "кост": "/cost"
+  # /doctor
   "доктор": "/doctor"
+  # /init
   "инит": "/init"
+  # /login
   "логин": "/login"
+  # /logout
   "логаут": "/logout"
+  # /review
   "ревью": "/review"
+  # /bug
   "баг": "/bug"
+  # /terminal
   "терминал": "/terminal"
+  # /vim
   "вим": "/vim"
+  # /resume
   "резюме": "/resume"
+  # /pr-comments
   "pr-комментс": "/pr-comments"
+
+# Help commands (show available commands)
+help_commands:
+  - "команды"
+  - "помоги"
+  - "справка"
+  - "help"
 
 # Dictation prefixes (text after prefix is typed as-is)
 dictation_prefixes:

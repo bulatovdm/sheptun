@@ -81,8 +81,8 @@ class AudioRecorder:
 @dataclass
 class VoiceActivityConfig:
     energy_threshold: float = 0.01
-    silence_duration: float = 1.5
-    min_speech_duration: float = 0.3
+    silence_duration: float = 0.5
+    min_speech_duration: float = 0.2
     max_speech_duration: float = 30.0
 
 

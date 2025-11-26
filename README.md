@@ -25,4 +25,6 @@ sheptun list-commands       # Список команд
 - `скажи <текст>` → вводит текст
 - `стоп` → останавливает
 
-Настройка команд: `config/commands.yaml`
+## Настройка команд
+
+Создайте файл `~/.config/sheptun/commands.yaml` или `./sheptun.yaml` для своих команд.

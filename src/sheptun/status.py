@@ -1,9 +1,21 @@
+import subprocess
 from enum import Enum, auto
 
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
+
+HELP_TEXT = """энтер, таб, эскейп, пробел
+вверх, вниз, влево, вправо
+удали, удали слово, удали строку
+клир - /clear
+стоп - остановить"""
+
+
+def _send_notification(title: str, message: str) -> None:
+    script = f'display notification "{message}" with title "{title}"'
+    subprocess.run(["osascript", "-e", script], check=False, capture_output=True)
 
 
 class Status(Enum):
@@ -69,6 +81,9 @@ class ConsoleStatusIndicator:
     def show_action(self, action_description: str) -> None:
         self._console.print(f"[green]Действие:[/green] {action_description}")
 
+    def show_help(self) -> None:
+        _send_notification("Sheptun - Команды", HELP_TEXT)
+
     def _update_status(self, status: Status) -> None:
         self._status = status
         if self._live is not None:
@@ -115,3 +130,6 @@ class SimpleStatusIndicator:
 
     def show_action(self, action_description: str) -> None:
         self._console.print(f"[green]Действие:[/green] {action_description}")
+
+    def show_help(self) -> None:
+        _send_notification("Sheptun - Команды", HELP_TEXT)

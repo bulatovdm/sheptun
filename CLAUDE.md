@@ -46,7 +46,10 @@ src/sheptun/
 
 **Data flow:** Microphone → VAD (silence detection) → Whisper → CommandParser → KeyboardSender
 
-**Command config:** `config/commands.yaml` defines all voice commands. Users can override with `~/.config/sheptun/commands.yaml` or `./sheptun.yaml`.
+**Command config lookup order:**
+1. `./sheptun.yaml` (project-local)
+2. `~/.config/sheptun/commands.yaml` (user global)
+3. Built-in default (`src/sheptun/config/commands.yaml`)
 
 ## Key Design Decisions
 
@@ -57,7 +60,7 @@ src/sheptun/
 
 ## Adding New Commands
 
-Edit `config/commands.yaml`:
+Create `~/.config/sheptun/commands.yaml` or `./sheptun.yaml`:
 ```yaml
 control_commands:
   "новая команда": { type: "key", value: "f5" }

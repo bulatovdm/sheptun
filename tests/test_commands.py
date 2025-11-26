@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pytest
 
 from sheptun.commands import CommandConfig, CommandParser
@@ -70,6 +68,18 @@ class TestCommandParser:
         assert action is not None
         assert action.action_type == ActionType.STOP
 
+    def test_parse_stop_command_in_phrase(self, parser: CommandParser) -> None:
+        action = parser.parse("скажите стоп для выхода")
+
+        assert action is not None
+        assert action.action_type == ActionType.STOP
+
+    def test_parse_stop_command_with_punctuation(self, parser: CommandParser) -> None:
+        action = parser.parse("Стоп!")
+
+        assert action is not None
+        assert action.action_type == ActionType.STOP
+
     def test_parse_slash_command_known(self, parser: CommandParser) -> None:
         action = parser.parse("слэш хелп")
 
@@ -83,6 +93,20 @@ class TestCommandParser:
         assert action is not None
         assert action.action_type == ActionType.SLASH
         assert action.value == "/фу"
+
+    def test_parse_slash_command_slish_variant(self, parser: CommandParser) -> None:
+        action = parser.parse("слышь клир")
+
+        assert action is not None
+        assert action.action_type == ActionType.SLASH
+        assert action.value == "/clear"
+
+    def test_parse_slash_command_without_prefix(self, parser: CommandParser) -> None:
+        action = parser.parse("клир")
+
+        assert action is not None
+        assert action.action_type == ActionType.SLASH
+        assert action.value == "/clear"
 
     def test_parse_dictation_with_prefix(self, parser: CommandParser) -> None:
         action = parser.parse("скажи привет мир")
