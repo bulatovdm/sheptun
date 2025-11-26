@@ -54,7 +54,9 @@ class WhisperRecognizer:
 
         return RecognitionResult(text=text, confidence=confidence)
 
-    def _bytes_to_float_array(self, audio_data: bytes, sample_rate: int) -> np.ndarray[Any, Any] | None:
+    def _bytes_to_float_array(
+        self, audio_data: bytes, sample_rate: int
+    ) -> np.ndarray[Any, Any] | None:
         if len(audio_data) == 0:
             return None
 
@@ -75,9 +77,9 @@ class WhisperRecognizer:
         duration = len(audio) / orig_sr
         target_length = int(duration * target_sr)
         indices = np.linspace(0, len(audio) - 1, target_length)
-        resampled: np.ndarray[Any, Any] = np.interp(
-            indices, np.arange(len(audio)), audio
-        ).astype(np.float32)
+        resampled: np.ndarray[Any, Any] = np.interp(indices, np.arange(len(audio)), audio).astype(
+            np.float32
+        )
         return resampled
 
     def _calculate_confidence(self, segments: list[dict[str, Any]]) -> float:

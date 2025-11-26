@@ -82,7 +82,10 @@ class ConsoleStatusIndicator:
         self._console.print(f"[green]Действие:[/green] {action_description}")
 
     def show_help(self) -> None:
-        _send_notification("Sheptun - Команды", HELP_TEXT)
+        self._console.print("\n[bold cyan]Доступные команды:[/bold cyan]")
+        self._console.print(HELP_TEXT)
+        self._console.print()
+        _send_notification("Sheptun - Команды", "Справка выведена в консоль")
 
     def _update_status(self, status: Status) -> None:
         self._status = status
@@ -132,4 +135,7 @@ class SimpleStatusIndicator:
         self._console.print(f"[green]Действие:[/green] {action_description}")
 
     def show_help(self) -> None:
-        _send_notification("Sheptun - Команды", HELP_TEXT)
+        self._console.print("\n[bold cyan]Доступные команды:[/bold cyan]")
+        self._console.print(HELP_TEXT)
+        self._console.print()
+        _send_notification("Sheptun - Команды", "Справка выведена в консоль")

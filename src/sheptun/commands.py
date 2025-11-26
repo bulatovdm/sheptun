@@ -136,7 +136,7 @@ class CommandParser:
 
         for prefix in slash_prefixes:
             if normalized.startswith(prefix):
-                command_part = normalized[len(prefix):].strip()
+                command_part = normalized[len(prefix) :].strip()
                 break
 
         if command_part is not None:

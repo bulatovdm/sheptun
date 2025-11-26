@@ -108,6 +108,7 @@ slash_commands:
 # Help commands (show available commands)
 help_commands:
   - "команды"
+  - "каманды"
   - "помоги"
   - "справка"
   - "help"

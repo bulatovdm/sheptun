@@ -1,0 +1,70 @@
+"""Application settings loaded from environment variables."""
+
+import os
+from dataclasses import dataclass
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Load .env file if exists
+load_dotenv()
+
+
+def _get_bool(key: str, default: bool = False) -> bool:
+    value = os.getenv(key, str(default)).lower()
+    return value in ("true", "1", "yes")
+
+
+def _get_float(key: str, default: float) -> float:
+    value = os.getenv(key)
+    if value is None:
+        return default
+    return float(value)
+
+
+def _get_str(key: str, default: str) -> str:
+    return os.getenv(key, default)
+
+
+def _get_optional_str(key: str) -> str | None:
+    value = os.getenv(key)
+    return value if value else None
+
+
+@dataclass(frozen=True)
+class Settings:
+    # Whisper model
+    model: str = _get_str("SHEPTUN_MODEL", "base")
+    device: str | None = _get_optional_str("SHEPTUN_DEVICE")
+
+    # Voice Activity Detection
+    energy_threshold: float = _get_float("SHEPTUN_ENERGY_THRESHOLD", 0.01)
+    silence_duration: float = _get_float("SHEPTUN_SILENCE_DURATION", 0.5)
+    min_speech_duration: float = _get_float("SHEPTUN_MIN_SPEECH_DURATION", 0.2)
+    max_speech_duration: float = _get_float("SHEPTUN_MAX_SPEECH_DURATION", 30.0)
+
+    # Debug
+    debug: bool = _get_bool("SHEPTUN_DEBUG", False)
+    log_file: Path = Path(_get_str("SHEPTUN_LOG_FILE", "logs/sheptun.log"))
+
+    # macOS app
+    app_path: Path = Path(_get_str("SHEPTUN_APP_PATH", "/Applications/Sheptun.app"))
+
+
+settings = Settings()
+
+
+def setup_logging(force: bool = False) -> None:
+    """Setup logging only if debug mode is enabled or force=True."""
+    if not settings.debug and not force:
+        return
+
+    import logging
+
+    log_file = settings.log_file
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[logging.FileHandler(log_file, encoding="utf-8")],
+    )

@@ -1,4 +1,3 @@
-import logging
 import signal
 import sys
 from pathlib import Path
@@ -10,8 +9,7 @@ from rich.console import Console
 from sheptun import __version__
 from sheptun.config import get_config_path
 from sheptun.engine import VoiceEngine
-
-LOG_FILE = Path.cwd() / "logs" / "sheptun.log"
+from sheptun.settings import settings, setup_logging
 
 app = typer.Typer(
     name="sheptun",
@@ -20,17 +18,6 @@ app = typer.Typer(
 )
 
 console = Console()
-
-
-def setup_debug_logging() -> None:
-    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=[
-            logging.FileHandler(LOG_FILE, encoding="utf-8"),
-        ],
-    )
 
 
 @app.command()
@@ -46,13 +33,13 @@ def listen(
         ),
     ] = None,
     model: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--model",
             "-m",
             help="Модель Whisper (tiny, base, small, medium, large)",
         ),
-    ] = "base",
+    ] = None,
     device: Annotated[
         str | None,
         typer.Option(
@@ -78,23 +65,27 @@ def listen(
     ] = False,
 ) -> None:
     """Запустить прослушивание голосовых команд."""
-    if debug:
-        setup_debug_logging()
+    use_debug = debug or settings.debug
+    if use_debug:
+        setup_logging(force=True)
+
+    model_name = model or settings.model
+    device_name = device or settings.device
 
     config_path = get_config_path(config)
     console.print(f"[dim]Конфигурация: {config_path}[/dim]")
-    console.print(f"[dim]Модель: {model}[/dim]")
-    if debug:
-        console.print(f"[dim]Лог: {LOG_FILE}[/dim]")
+    console.print(f"[dim]Модель: {model_name}[/dim]")
+    if use_debug:
+        console.print(f"[dim]Лог: {settings.log_file}[/dim]")
 
     console.print("[yellow]Загрузка модели Whisper...[/yellow]")
 
     engine = VoiceEngine.create(
         config_path=config_path,
-        model_name=model,
-        device=device,
-        use_live_status=not simple_status and not debug,
-        debug=debug,
+        model_name=model_name,
+        device=device_name,
+        use_live_status=not simple_status and not use_debug,
+        debug=use_debug,
     )
 
     def signal_handler(_signum: int, _frame: object) -> None:
@@ -203,19 +194,169 @@ def list_commands(
 @app.command()
 def menubar(
     model: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--model",
             "-m",
             help="Модель Whisper (tiny, base, small, medium, large)",
         ),
-    ] = "base",
+    ] = None,
 ) -> None:
     """Запустить как menubar приложение."""
     from sheptun.menubar import run_menubar
 
+    model_name = model or settings.model
     console.print("[yellow]Запуск menubar приложения...[/yellow]")
-    run_menubar(model_name=model)
+    run_menubar(model_name=model_name)
+
+
+@app.command()
+def restart() -> None:
+    """Перезапустить menubar приложение."""
+    import subprocess
+
+    app_path = settings.app_path
+
+    # Закрываем приложение
+    console.print("[yellow]Закрытие Sheptun...[/yellow]")
+    subprocess.run(["pkill", "-f", "sheptun.menubar"], check=False)
+
+    # Запускаем заново
+    console.print("[yellow]Запуск Sheptun...[/yellow]")
+    subprocess.Popen(["open", str(app_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    console.print("[green]✓ Sheptun перезапущен[/green]")
+
+
+@app.command()
+def install_app(
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Путь для установки приложения",
+        ),
+    ] = None,
+) -> None:
+    """Создать macOS приложение (.app) для menubar."""
+    import shutil
+    import stat
+    import subprocess
+    import sys
+
+    import whisper
+    from PIL import Image
+
+    # Загружаем модель Whisper заранее
+    model_name = settings.model
+    console.print(f"[yellow]Загрузка модели Whisper '{model_name}'...[/yellow]")
+    whisper.load_model(model_name)
+    console.print(f"[green]✓ Модель '{model_name}' загружена[/green]")
+
+    # Определяем пути
+    project_dir = Path(__file__).parent.parent.parent
+    venv_python = Path(sys.executable)
+    resources_dir = Path(__file__).parent / "resources"
+
+    # Создаём структуру .app
+    app_dir = output or settings.app_path
+    contents_dir = app_dir / "Contents"
+    macos_dir = contents_dir / "MacOS"
+    resources_app_dir = contents_dir / "Resources"
+    iconset_dir = resources_app_dir / "AppIcon.iconset"
+
+    if app_dir.exists():
+        shutil.rmtree(app_dir)
+
+    macos_dir.mkdir(parents=True)
+    iconset_dir.mkdir(parents=True)
+
+    # Info.plist
+    info_plist = contents_dir / "Info.plist"
+    info_plist.write_text(f"""\
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>sheptun</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.sheptun.menubar</string>
+    <key>CFBundleName</key>
+    <string>Sheptun</string>
+    <key>CFBundleDisplayName</key>
+    <string>Sheptun</string>
+    <key>CFBundleVersion</key>
+    <string>{__version__}</string>
+    <key>CFBundleShortVersionString</key>
+    <string>{__version__}</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>10.15</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Sheptun needs microphone access for voice recognition</string>
+</dict>
+</plist>
+""")
+
+    # Исполняемый скрипт
+    executable = macos_dir / "sheptun"
+    executable.write_text(f"""\
+#!/bin/bash
+cd "{project_dir}"
+source "{venv_python.parent.parent}/bin/activate"
+exec python -m sheptun.menubar
+""")
+    executable.chmod(executable.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+    # Генерация иконок
+    icon_src = resources_dir / "microphone-idle.png"
+    if icon_src.exists():
+        img = Image.open(icon_src).convert("RGBA")
+        icon_ratio = 0.70
+        sizes = [16, 32, 64, 128, 256, 512]
+
+        for size in sizes:
+            # @1x
+            canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+            icon_size = int(size * icon_ratio)
+            offset = (size - icon_size) // 2
+            resized = img.resize((icon_size, icon_size), Image.Resampling.LANCZOS)
+            canvas.paste(resized, (offset, offset), resized)
+            canvas.save(iconset_dir / f"icon_{size}x{size}.png")
+
+            # @2x
+            size2x = size * 2
+            if size2x <= 1024:
+                canvas2x = Image.new("RGBA", (size2x, size2x), (0, 0, 0, 0))
+                icon_size2x = int(size2x * icon_ratio)
+                offset2x = (size2x - icon_size2x) // 2
+                resized2x = img.resize((icon_size2x, icon_size2x), Image.Resampling.LANCZOS)
+                canvas2x.paste(resized2x, (offset2x, offset2x), resized2x)
+                canvas2x.save(iconset_dir / f"icon_{size}x{size}@2x.png")
+
+        # Конвертируем в .icns
+        subprocess.run(
+            [
+                "iconutil",
+                "-c",
+                "icns",
+                str(iconset_dir),
+                "-o",
+                str(resources_app_dir / "AppIcon.icns"),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        shutil.rmtree(iconset_dir)
+
+    console.print(f"[green]✓ Приложение создано: {app_dir}[/green]")
+    console.print("[dim]Теперь можно запустить из Launchpad или Finder[/dim]")
 
 
 if __name__ == "__main__":

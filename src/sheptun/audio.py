@@ -78,6 +78,17 @@ class AudioRecorder:
             self._buffer.append(indata.tobytes())
 
 
+def _default_vad_config() -> "VoiceActivityConfig":
+    from sheptun.settings import settings
+
+    return VoiceActivityConfig(
+        energy_threshold=settings.energy_threshold,
+        silence_duration=settings.silence_duration,
+        min_speech_duration=settings.min_speech_duration,
+        max_speech_duration=settings.max_speech_duration,
+    )
+
+
 @dataclass
 class VoiceActivityConfig:
     energy_threshold: float = 0.01
@@ -136,7 +147,7 @@ class ContinuousAudioRecorder:
         vad_config: VoiceActivityConfig | None = None,
     ) -> None:
         self._audio_config = audio_config or AudioConfig()
-        self._vad = VoiceActivityDetector(vad_config or VoiceActivityConfig())
+        self._vad = VoiceActivityDetector(vad_config or _default_vad_config())
         self._buffer: list[bytes] = []
         self._stream: sd.InputStream | None = None
         self._running = False

@@ -1,15 +1,20 @@
 import importlib.resources
+import logging
 import threading
 from typing import Any
 
-import rumps  # type: ignore[import-untyped]
+import rumps
 
 from sheptun.audio import AudioConfig, VoiceActivityConfig
-from sheptun.commands import CommandConfigLoader
+from sheptun.commands import CommandConfigLoader, CommandParser
 from sheptun.config import get_config_path
 from sheptun.keyboard import MacOSKeyboardSender
 from sheptun.recognition import WhisperRecognizer
+from sheptun.settings import setup_logging
 from sheptun.types import Action, ActionType
+
+setup_logging()
+logger = logging.getLogger("sheptun.menubar")
 
 
 def _get_icon_path(name: str) -> str:
@@ -48,17 +53,19 @@ class MenubarStatusIndicator:
         pass
 
     def show_help(self) -> None:
-        self._app.show_notification(
-            "Sheptun - Команды",
-            "энтер, таб, эскейп, пробел\nвверх, вниз, влево, вправо\nудали, клир, стоп",
-        )
+        import subprocess
+
+        logger.info("Showing help notification")
+        message = "энтер, таб, эскейп, пробел, вверх, вниз, влево, вправо, удали, клир, стоп"
+        script = f'display notification "{message}" with title "Sheptun - Команды"'
+        subprocess.run(["osascript", "-e", script], check=False, capture_output=True)
 
 
 class MenubarVoiceEngine:
     def __init__(
         self,
         recognizer: WhisperRecognizer,
-        command_parser: "CommandParser",
+        command_parser: CommandParser,
         keyboard_sender: MacOSKeyboardSender,
         status_indicator: MenubarStatusIndicator,
         audio_config: AudioConfig | None = None,
@@ -101,27 +108,32 @@ class MenubarVoiceEngine:
         if not self._running:
             return
 
+        logger.debug(f"Speech detected: {len(audio_data)} bytes")
         self._status.processing()
 
         try:
             result = self._recognizer.recognize(audio_data, self._recorder.sample_rate)
 
             if result is None or not result.text:
+                logger.debug("Recognition returned empty result")
                 self._status.listening()
                 return
 
+            logger.info(f"Recognized: '{result.text}'")
             action = self._command_parser.parse(result.text)
+            logger.debug(f"Parsed action: {action}")
 
             if action is not None:
                 self._execute_action(action)
 
-        except Exception:
-            pass
+        except Exception as e:
+            logger.exception(f"Error processing speech: {e}")
 
         if self._running:
             self._status.listening()
 
     def _execute_action(self, action: Action) -> None:
+        logger.info(f"Executing action: {action.action_type.name} = {action.value}")
         match action.action_type:
             case ActionType.STOP:
                 self.stop()
@@ -147,9 +159,6 @@ class MenubarVoiceEngine:
                 self._status.show_help()
 
 
-from sheptun.commands import CommandParser
-
-
 class SheptunMenubar(rumps.App):  # type: ignore[misc]
     def __init__(self, model_name: str = "base") -> None:
         super().__init__("Sheptun", quit_button=None, template=True)  # type: ignore[arg-type]
@@ -166,6 +175,7 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         self.menu = [
             self._start_menu_item,
             None,
+            rumps.MenuItem("Перезапустить", callback=self._restart),
             rumps.MenuItem("Выход", callback=self._quit),
         ]
 
@@ -215,12 +225,42 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
     def show_notification(self, title: str, message: str) -> None:
         rumps.notification(title, "", message)  # type: ignore[no-untyped-call]
 
+    def _restart(self, _: Any) -> None:
+        import os
+        import subprocess
+
+        from sheptun.settings import settings
+
+        if self._engine is not None:
+            self._engine.stop()
+
+        app_path = settings.app_path
+        subprocess.Popen(["open", str(app_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        os._exit(0)
+
     def _quit(self, _: Any) -> None:
         if self._engine is not None:
             self._engine.stop()
         rumps.quit_application()  # type: ignore[no-untyped-call]
 
 
+def _hide_dock_icon() -> None:
+    """Hide the app icon from the Dock."""
+    try:
+        import AppKit  # type: ignore[import-untyped]
+
+        NSApplication = getattr(AppKit, "NSApplication")  # noqa: B009
+        policy = getattr(AppKit, "NSApplicationActivationPolicyAccessory")  # noqa: B009
+        NSApplication.sharedApplication().setActivationPolicy_(policy)
+    except ImportError:
+        logger.warning("AppKit not available, cannot hide dock icon")
+
+
 def run_menubar(model_name: str = "base") -> None:
+    _hide_dock_icon()
     app = SheptunMenubar(model_name=model_name)
     app.run()  # type: ignore[no-untyped-call]
+
+
+if __name__ == "__main__":
+    run_menubar()

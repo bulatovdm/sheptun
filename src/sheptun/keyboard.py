@@ -3,18 +3,18 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-import Quartz  # type: ignore[import-untyped]
+import Quartz
 
 # Quartz functions and constants - using getattr to avoid Pylance errors
 # for untyped module attributes
-CGEventCreateKeyboardEvent: Any = getattr(Quartz, "CGEventCreateKeyboardEvent")
-CGEventPost: Any = getattr(Quartz, "CGEventPost")
-CGEventSetFlags: Any = getattr(Quartz, "CGEventSetFlags")
-kCGEventFlagMaskAlternate: int = getattr(Quartz, "kCGEventFlagMaskAlternate")
-kCGEventFlagMaskCommand: int = getattr(Quartz, "kCGEventFlagMaskCommand")
-kCGEventFlagMaskControl: int = getattr(Quartz, "kCGEventFlagMaskControl")
-kCGEventFlagMaskShift: int = getattr(Quartz, "kCGEventFlagMaskShift")
-kCGHIDEventTap: Any = getattr(Quartz, "kCGHIDEventTap")
+CGEventCreateKeyboardEvent: Any = getattr(Quartz, "CGEventCreateKeyboardEvent")  # noqa: B009
+CGEventPost: Any = getattr(Quartz, "CGEventPost")  # noqa: B009
+CGEventSetFlags: Any = getattr(Quartz, "CGEventSetFlags")  # noqa: B009
+kCGEventFlagMaskAlternate: int = getattr(Quartz, "kCGEventFlagMaskAlternate")  # noqa: B009
+kCGEventFlagMaskCommand: int = getattr(Quartz, "kCGEventFlagMaskCommand")  # noqa: B009
+kCGEventFlagMaskControl: int = getattr(Quartz, "kCGEventFlagMaskControl")  # noqa: B009
+kCGEventFlagMaskShift: int = getattr(Quartz, "kCGEventFlagMaskShift")  # noqa: B009
+kCGHIDEventTap: Any = getattr(Quartz, "kCGHIDEventTap")  # noqa: B009
 
 
 @dataclass(frozen=True, slots=True)

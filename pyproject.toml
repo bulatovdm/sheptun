@@ -28,6 +28,7 @@ dependencies = [
     "pyobjc-framework-Quartz>=10.0",
     "rumps>=0.4.0",
     "pillow>=10.0.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -87,7 +88,7 @@ check_untyped_defs = true
 disallow_untyped_decorators = true
 no_implicit_optional = true
 warn_redundant_casts = true
-warn_unused_ignores = true
+warn_unused_ignores = false
 warn_no_return = true
 follow_imports = "normal"
 ignore_missing_imports = false
@@ -99,6 +100,7 @@ module = [
     "Quartz.*",
     "rumps.*",
     "PIL.*",
+    "AppKit.*",
 ]
 ignore_missing_imports = true
 
