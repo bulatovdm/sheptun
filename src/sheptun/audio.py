@@ -202,21 +202,16 @@ class ContinuousAudioRecorder:
             return
 
         chunk = indata.tobytes()
+        audio_data: bytes | None = None
 
         with self._lock:
             self._buffer.append(chunk)
+            speech_complete = self._vad.process_chunk(chunk, self._audio_config.sample_rate)
 
-        speech_complete = self._vad.process_chunk(chunk, self._audio_config.sample_rate)
+            if speech_complete:
+                audio_data = b"".join(self._buffer)
+                self._buffer.clear()
+                self._vad.reset()
 
-        if speech_complete:
-            self._handle_speech_complete()
-
-    def _handle_speech_complete(self) -> None:
-        with self._lock:
-            audio_data = b"".join(self._buffer)
-            self._buffer.clear()
-
-        self._vad.reset()
-
-        if self._on_speech_complete is not None:
+        if audio_data is not None and self._on_speech_complete is not None:
             self._on_speech_complete(audio_data)
