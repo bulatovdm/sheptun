@@ -108,7 +108,6 @@ class MenubarVoiceEngine:
             return self._running
 
     def recognize_and_execute(self, audio_data: bytes) -> None:
-        """Recognize audio and execute action (for push-to-talk)."""
         try:
             result = self._recognizer.recognize(audio_data, self._recorder.sample_rate)
             if result and result.text:

@@ -1,5 +1,3 @@
-"""Global hotkey management for Sheptun."""
-
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -10,7 +8,6 @@ logger = logging.getLogger("sheptun.hotkeys")
 
 
 def parse_hotkey(hotkey_str: str) -> set[Any] | None:
-    """Parse hotkey string like '<ctrl>+<alt>+s' into set of keys."""
     if not hotkey_str:
         return None
 
@@ -40,7 +37,6 @@ def parse_hotkey(hotkey_str: str) -> set[Any] | None:
 
 
 def format_hotkey_display(hotkey_str: str) -> str:
-    """Format hotkey string for display (e.g., '<ctrl>+<alt>+s' -> '⌃⌥S')."""
     return (
         hotkey_str.replace("<cmd>", "⌘")
         .replace("<shift>", "⇧")
@@ -52,8 +48,6 @@ def format_hotkey_display(hotkey_str: str) -> str:
 
 
 class HotkeyManager:
-    """Manages global hotkeys for toggle and push-to-talk modes."""
-
     def __init__(
         self,
         toggle_hotkey: str | None = None,
@@ -77,12 +71,10 @@ class HotkeyManager:
 
     @property
     def toggle_hotkey_display(self) -> str:
-        """Get formatted toggle hotkey for display."""
         return format_hotkey_display(self._toggle_hotkey_str) if self._toggle_hotkey_str else ""
 
     @property
     def ptt_hotkey_display(self) -> str:
-        """Get formatted PTT hotkey for display."""
         return format_hotkey_display(self._ptt_hotkey_str) if self._ptt_hotkey_str else ""
 
     def set_callbacks(
@@ -91,13 +83,11 @@ class HotkeyManager:
         on_ptt_start: Callable[[], None] | None = None,
         on_ptt_stop: Callable[[], None] | None = None,
     ) -> None:
-        """Set callback functions for hotkey events."""
         self._on_toggle = on_toggle
         self._on_ptt_start = on_ptt_start
         self._on_ptt_stop = on_ptt_stop
 
     def start(self) -> None:
-        """Start listening for hotkeys."""
         if self._listener is not None:
             return
 
@@ -119,17 +109,14 @@ class HotkeyManager:
         logger.info(f"Hotkey listener started: {', '.join(hotkeys)}")
 
     def stop(self) -> None:
-        """Stop listening for hotkeys."""
         if self._listener is not None:
             self._listener.stop()
             self._listener = None
             logger.info("Hotkey listener stopped")
 
     def _on_press(self, key: Any) -> None:
-        """Handle key press event."""
         self._pressed_keys.add(key)
 
-        # Check toggle hotkey
         if (
             self._toggle_keys
             and self._toggle_keys.issubset(self._pressed_keys)
@@ -140,7 +127,6 @@ class HotkeyManager:
             if self._on_toggle:
                 self._on_toggle()
 
-        # Check PTT hotkey
         if (
             self._ptt_keys
             and self._ptt_keys.issubset(self._pressed_keys)
@@ -152,14 +138,11 @@ class HotkeyManager:
                 self._on_ptt_start()
 
     def _on_release(self, key: Any) -> None:
-        """Handle key release event."""
         self._pressed_keys.discard(key)
 
-        # Reset toggle state when keys released
         if self._toggle_active and self._toggle_keys and not self._toggle_keys.issubset(self._pressed_keys):
             self._toggle_active = False
 
-        # Handle PTT release
         if self._ptt_active and self._ptt_keys and not self._ptt_keys.issubset(self._pressed_keys):
             self._ptt_active = False
             logger.debug("PTT hotkey released")

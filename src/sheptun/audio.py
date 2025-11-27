@@ -191,14 +191,12 @@ SILERO_BLOCKSIZE = 512  # Silero VAD requires exactly 512 samples for 16kHz
 
 
 def get_vad_blocksize(vad_type: str) -> int:
-    """Return optimal audio blocksize for VAD type."""
     if vad_type == "silero":
         return SILERO_BLOCKSIZE
     return DEFAULT_BLOCKSIZE
 
 
 def create_vad(config: VoiceActivityConfig, vad_type: str = "energy") -> EnergyVAD | SileroVAD:
-    """Create VAD instance based on configuration."""
     if vad_type == "silero":
         return SileroVAD(config)
     return EnergyVAD(config)

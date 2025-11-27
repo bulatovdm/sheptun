@@ -1,5 +1,3 @@
-"""Application settings loaded from environment variables."""
-
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,7 +48,6 @@ settings = Settings()
 
 
 def setup_logging(force: bool = False) -> None:
-    """Setup logging only if debug mode is enabled or force=True."""
     if not settings.debug and not force:
         return
 
