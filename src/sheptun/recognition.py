@@ -4,13 +4,22 @@ from typing import Any
 import numpy as np
 import whisper
 
+from sheptun.settings import settings
 from sheptun.types import RecognitionResult
 
 
 class WhisperRecognizer:
-    def __init__(self, model_name: str = "base", device: str | None = None) -> None:
+    def __init__(
+        self,
+        model_name: str = "base",
+        device: str | None = None,
+        hallucinations: tuple[str, ...] | None = None,
+    ) -> None:
         self._model: Any = whisper.load_model(model_name, device=device)
         self._model_name = model_name
+        self._hallucinations = {
+            h.lower() for h in (hallucinations or settings.hallucinations)
+        }
 
     @property
     def model_name(self) -> str:
@@ -32,6 +41,9 @@ class WhisperRecognizer:
         if not text:
             return None
 
+        if self._is_hallucination(text):
+            return None
+
         segments = result.get("segments", [])
         confidence = self._calculate_confidence(segments)
 
@@ -49,10 +61,16 @@ class WhisperRecognizer:
         if not text:
             return None
 
+        if self._is_hallucination(text):
+            return None
+
         segments = result.get("segments", [])
         confidence = self._calculate_confidence(segments)
 
         return RecognitionResult(text=text, confidence=confidence)
+
+    def _is_hallucination(self, text: str) -> bool:
+        return text.lower() in self._hallucinations
 
     def _bytes_to_float_array(
         self, audio_data: bytes, sample_rate: int

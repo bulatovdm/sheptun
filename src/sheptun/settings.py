@@ -32,7 +32,27 @@ def _get_path(key: str, default: Path) -> Path:
     return Path(_get_str(key, str(default))).expanduser()
 
 
+def _get_tuple(key: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    value = os.getenv(key)
+    if not value:
+        return default
+    return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
 _DEFAULT_DATASET_PATH = Path("dataset")
+
+_DEFAULT_HALLUCINATIONS = (
+    "Продолжение следует...",
+    "Субтитры сделал DimaTorzworWorWorWork",
+    "Субтитры создавал DimaTorzworWorWorWorks",
+    "Субтитры делал DimaTorzworWorWorWorWorks",
+    "Редактор субтитров А.Синецкая Корректор А.Егорова",
+    "Спасибо за просмотр!",
+    "Спасибо за внимание.",
+    "Благодарю за внимание.",
+    "До свидания.",
+    "Пока.",
+)
 
 
 @dataclass(frozen=True)
@@ -51,6 +71,7 @@ class Settings:
     app_path: Path = Path(_get_str("SHEPTUN_APP_PATH", "/Applications/Sheptun.app"))
     record_dataset: bool = _get_bool("SHEPTUN_RECORD_DATASET", False)
     dataset_path: Path = _get_path("SHEPTUN_DATASET_PATH", _DEFAULT_DATASET_PATH)
+    hallucinations: tuple[str, ...] = _get_tuple("SHEPTUN_HALLUCINATIONS", _DEFAULT_HALLUCINATIONS)
 
 
 settings = Settings()

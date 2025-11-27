@@ -70,6 +70,7 @@ Command config: `./sheptun.yaml` or `~/.config/sheptun/commands.yaml`
 - Protocols in `types.py` for dependency injection
 - VAD (Voice Activity Detection) with energy threshold + silence duration
 - Quartz CGEventCreateKeyboardEvent for keyboard simulation
+- Hallucination filtering in `recognition.py` (configurable via `SHEPTUN_HALLUCINATIONS`)
 - Settings loaded once at import via dotenv (restart needed for changes)
 
 ## Code Style
