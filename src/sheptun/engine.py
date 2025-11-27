@@ -9,7 +9,14 @@ from sheptun.keyboard import MacOSKeyboardSender
 from sheptun.recognition import WhisperRecognizer
 from sheptun.settings import settings
 from sheptun.status import ConsoleStatusIndicator, SimpleStatusIndicator
-from sheptun.types import Action, ActionType, KeyboardSender, SpeechRecognizer, StatusIndicator
+from sheptun.types import (
+    Action,
+    ActionType,
+    AppState,
+    KeyboardSender,
+    SpeechRecognizer,
+    StatusIndicator,
+)
 
 logger = logging.getLogger("sheptun")
 
@@ -31,14 +38,23 @@ class BaseVoiceEngine:
         self._status = status_indicator
         self._recorder = ContinuousAudioRecorder(audio_config, vad_config)
         self._dataset_recorder = DatasetRecorder() if record_dataset else None
-        self._running = False
+        self._state = AppState.IDLE
         self._lock = threading.Lock()
+
+    @property
+    def state(self) -> AppState:
+        with self._lock:
+            return self._state
+
+    def _set_state(self, state: AppState) -> None:
+        with self._lock:
+            self._state = state
 
     def start(self) -> None:
         with self._lock:
-            if self._running:
+            if self._state != AppState.IDLE:
                 return
-            self._running = True
+            self._state = AppState.RECORDING_TOGGLE
 
         self._on_start()
         self._recorder.set_callback(self._on_speech_detected)
@@ -46,16 +62,16 @@ class BaseVoiceEngine:
 
     def stop(self) -> None:
         with self._lock:
-            if not self._running:
+            if self._state == AppState.IDLE:
                 return
-            self._running = False
+            self._state = AppState.IDLE
 
         self._recorder.stop()
         self._on_stop()
 
     def is_running(self) -> bool:
         with self._lock:
-            return self._running
+            return self._state != AppState.IDLE
 
     def set_keyboard_sender(self, keyboard_sender: KeyboardSender) -> None:
         """Set the keyboard sender to use for text input."""
@@ -94,10 +110,11 @@ class BaseVoiceEngine:
         self._log(f"Saved to dataset: {path}")
 
     def _on_speech_detected(self, audio_data: bytes) -> None:
-        if not self._running:
+        if self.state == AppState.IDLE:
             return
 
         self._log(f"Speech detected: {len(audio_data)} bytes")
+        self._set_state(AppState.PROCESSING)
         self._status.processing()
 
         try:
@@ -105,7 +122,7 @@ class BaseVoiceEngine:
 
             if result is None or not result.text:
                 self._log("Recognition returned empty result")
-                self._status.listening()
+                self._resume_listening()
                 return
 
             self._log(f"Recognized: '{result.text}'")
@@ -121,7 +138,11 @@ class BaseVoiceEngine:
             self._log(f"Error processing speech: {e}")
             self._status.error(str(e))
 
-        if self._running:
+        self._resume_listening()
+
+    def _resume_listening(self) -> None:
+        if self.state != AppState.IDLE:
+            self._set_state(AppState.RECORDING_TOGGLE)
             self._status.listening()
 
     def _execute_action(self, action: Action) -> None:
@@ -180,7 +201,6 @@ class VoiceEngine(BaseVoiceEngine):
             vad_config=vad_config,
             record_dataset=record_dataset,
         )
-        self._stop_requested = False
         self._debug = debug
 
     @classmethod
@@ -209,26 +229,12 @@ class VoiceEngine(BaseVoiceEngine):
         )
 
     def _on_start(self) -> None:
-        self._stop_requested = False
         self._status.start()
         self._status.listening()
 
     def _on_stop(self) -> None:
         self._status.stop()
 
-    def request_stop(self) -> None:
-        with self._lock:
-            self._stop_requested = True
-
-    def is_running(self) -> bool:
-        with self._lock:
-            if self._stop_requested and self._running:
-                return False
-            return self._running
-
     def _log(self, message: str) -> None:
         if self._debug:
             logger.debug(message)
-
-    def _handle_stop(self) -> None:
-        self.request_stop()
