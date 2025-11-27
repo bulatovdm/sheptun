@@ -74,6 +74,7 @@ select = [
 ]
 ignore = [
     "E501",   # line too long (handled by formatter)
+    "RUF001", # ambiguous unicode characters (expected for Russian text)
 ]
 
 [tool.ruff.lint.isort]

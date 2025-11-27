@@ -19,6 +19,25 @@ app = typer.Typer(
 
 console = Console()
 
+PROCESS_KILL_DELAY = 0.5
+APP_LAUNCH_DELAY = 1.0
+
+
+def _success(msg: str) -> None:
+    console.print(f"[green]✓ {msg}[/green]")
+
+
+def _info(msg: str) -> None:
+    console.print(f"[yellow]{msg}[/yellow]")
+
+
+def _error(msg: str) -> None:
+    console.print(f"[red]✗ {msg}[/red]")
+
+
+def _hint(msg: str) -> None:
+    console.print(f"[dim]{msg}[/dim]")
+
 
 @app.command()
 def listen(
@@ -73,12 +92,12 @@ def listen(
     device_name = device or settings.device
 
     config_path = get_config_path(config)
-    console.print(f"[dim]Конфигурация: {config_path}[/dim]")
-    console.print(f"[dim]Модель: {model_name}[/dim]")
+    _hint(f"Конфигурация: {config_path}")
+    _hint(f"Модель: {model_name}")
     if use_debug:
-        console.print(f"[dim]Лог: {settings.log_file}[/dim]")
+        _hint(f"Лог: {settings.log_file}")
 
-    console.print("[yellow]Загрузка модели Whisper...[/yellow]")
+    _info("Загрузка модели Whisper...")
 
     engine = VoiceEngine.create(
         config_path=config_path,
@@ -89,15 +108,15 @@ def listen(
     )
 
     def signal_handler(_signum: int, _frame: object) -> None:
-        console.print("\n[yellow]Завершение работы...[/yellow]")
+        _info("\nЗавершение работы...")
         engine.stop()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    console.print("[green]Модель загружена. Начинаю слушать...[/green]")
-    console.print("[dim]Скажите 'стоп' или нажмите Ctrl+C для выхода[/dim]\n")
+    _success("Модель загружена. Начинаю слушать...")
+    _hint("Скажите 'стоп' или нажмите Ctrl+C для выхода\n")
 
     engine.start()
 
@@ -124,15 +143,15 @@ def test_mic() -> None:
     import numpy as np
     import sounddevice as sd
 
-    console.print("[yellow]Проверка микрофона...[/yellow]")
+    _info("Проверка микрофона...")
 
     default_input: dict[str, Any] = sd.query_devices(kind="input")  # pyright: ignore[reportUnknownMemberType,reportAssignmentType]
 
     console.print(f"\n[green]Устройство по умолчанию:[/green] {default_input['name']}")
-    console.print(f"[dim]Каналы: {default_input['max_input_channels']}[/dim]")
-    console.print(f"[dim]Частота: {default_input['default_samplerate']} Hz[/dim]")
+    _hint(f"Каналы: {default_input['max_input_channels']}")
+    _hint(f"Частота: {default_input['default_samplerate']} Hz")
 
-    console.print("\n[yellow]Запись 3 секунды...[/yellow]")
+    _info("\nЗапись 3 секунды...")
 
     try:
         recording: np.ndarray[Any, np.dtype[np.int16]] = sd.rec(  # pyright: ignore[reportUnknownMemberType,reportAssignmentType]
@@ -146,12 +165,12 @@ def test_mic() -> None:
         energy: np.floating[Any] = np.sqrt(np.mean(recording.astype(np.float32) ** 2))
 
         if energy > 100:
-            console.print(f"[green]✓ Микрофон работает! Уровень сигнала: {energy:.0f}[/green]")
+            _success(f"Микрофон работает! Уровень сигнала: {energy:.0f}")
         else:
-            console.print(f"[yellow]⚠ Слабый сигнал. Уровень: {energy:.0f}[/yellow]")
+            _info(f"⚠ Слабый сигнал. Уровень: {energy:.0f}")
 
     except Exception as e:
-        console.print(f"[red]✗ Ошибка: {e}[/red]")
+        _error(f"Ошибка: {e}")
         raise typer.Exit(1) from None
 
 
@@ -206,24 +225,34 @@ def menubar(
     from sheptun.menubar import run_menubar
 
     model_name = model or settings.model
-    console.print("[yellow]Запуск menubar приложения...[/yellow]")
+    _info("Запуск menubar приложения...")
     run_menubar(model_name=model_name)
 
 
 def _kill_menubar_app() -> None:
     import subprocess
+    import time
 
-    console.print("[yellow]Закрытие Sheptun...[/yellow]")
+    _info("Закрытие Sheptun...")
     subprocess.run(["pkill", "-f", "sheptun.menubar"], check=False)
+    time.sleep(PROCESS_KILL_DELAY)
 
 
 def _launch_menubar_app() -> None:
     import subprocess
+    import time
 
-    console.print("[yellow]Запуск Sheptun...[/yellow]")
-    subprocess.Popen(
-        ["open", str(settings.app_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    app_path = settings.app_path
+    if not app_path.exists():
+        _error(f"Приложение не найдено: {app_path}")
+        _hint("Запустите 'sheptun install-app' для установки")
+        return
+
+    _info("Запуск Sheptun...")
+    subprocess.run(
+        ["open", str(app_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
     )
+    time.sleep(APP_LAUNCH_DELAY)
 
 
 @app.command()
@@ -231,16 +260,16 @@ def restart() -> None:
     """Перезапустить menubar приложение."""
     _kill_menubar_app()
     _launch_menubar_app()
-    console.print("[green]✓ Sheptun перезапущен[/green]")
+    _success("Sheptun перезапущен")
 
 
 def _preload_whisper_model() -> None:
     import whisper
 
     model_name = settings.model
-    console.print(f"[yellow]Загрузка модели Whisper '{model_name}'...[/yellow]")
+    _info(f"Загрузка модели Whisper '{model_name}'...")
     whisper.load_model(model_name)
-    console.print(f"[green]✓ Модель '{model_name}' загружена[/green]")
+    _success(f"Модель '{model_name}' загружена")
 
 
 def _get_whisper_cache_dir() -> Path:
@@ -257,24 +286,24 @@ def cleanup_models(
     """Удалить модели Whisper."""
     cache_dir = _get_whisper_cache_dir()
     if not cache_dir.exists():
-        console.print("[dim]Кэш моделей пуст[/dim]")
+        _hint("Кэш моделей пуст")
         return
 
     current_model = settings.model
 
     if model:
         if model == current_model:
-            console.print(f"[red]Нельзя удалить активную модель '{model}'[/red]")
+            _error(f"Нельзя удалить активную модель '{model}'")
             raise typer.Exit(1)
 
         model_file = cache_dir / f"{model}.pt"
         if not model_file.exists():
-            console.print(f"[red]Модель '{model}' не найдена[/red]")
+            _error(f"Модель '{model}' не найдена")
             raise typer.Exit(1)
 
         size_mb = model_file.stat().st_size / (1024 * 1024)
         model_file.unlink()
-        console.print(f"[green]✓ Удалена модель '{model}' ({size_mb:.0f} MB)[/green]")
+        _success(f"Удалена модель '{model}' ({size_mb:.0f} MB)")
         return
 
     deleted_count = 0
@@ -288,14 +317,14 @@ def cleanup_models(
         if not is_active_model(model_file.name):
             size_mb = model_file.stat().st_size / (1024 * 1024)
             model_file.unlink()
-            console.print(f"[dim]Удалена: {model_file.name} ({size_mb:.0f} MB)[/dim]")
+            _hint(f"Удалена: {model_file.name} ({size_mb:.0f} MB)")
             deleted_count += 1
             total_size_mb += size_mb
 
     if deleted_count == 0:
-        console.print("[green]Нет неиспользуемых моделей[/green]")
+        _success("Нет неиспользуемых моделей")
     else:
-        console.print(f"[green]✓ Удалено {deleted_count} моделей ({total_size_mb:.0f} MB)[/green]")
+        _success(f"Удалено {deleted_count} моделей ({total_size_mb:.0f} MB)")
 
 
 @app.command()
@@ -303,14 +332,14 @@ def list_models() -> None:
     """Показать загруженные модели Whisper."""
     cache_dir = _get_whisper_cache_dir()
     if not cache_dir.exists():
-        console.print("[dim]Кэш моделей пуст[/dim]")
+        _hint("Кэш моделей пуст")
         return
 
     current_model = settings.model
     models = list(cache_dir.glob("*.pt"))
 
     if not models:
-        console.print("[dim]Нет загруженных моделей[/dim]")
+        _hint("Нет загруженных моделей")
         return
 
     console.print("\n[bold]Загруженные модели:[/bold]")
@@ -342,8 +371,8 @@ def install_app(
     app_dir = output or settings.app_path
     build_app(app_dir)
 
-    console.print(f"[green]✓ Приложение создано: {app_dir}[/green]")
-    console.print("[dim]Теперь можно запустить из Launchpad или Finder[/dim]")
+    _success(f"Приложение создано: {app_dir}")
+    _hint("Теперь можно запустить из Launchpad или Finder")
 
 
 if __name__ == "__main__":
