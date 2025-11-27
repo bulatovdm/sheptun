@@ -72,6 +72,7 @@ class Settings:
     record_dataset: bool = _get_bool("SHEPTUN_RECORD_DATASET", False)
     dataset_path: Path = _get_path("SHEPTUN_DATASET_PATH", _DEFAULT_DATASET_PATH)
     hallucinations: tuple[str, ...] = _get_tuple("SHEPTUN_HALLUCINATIONS", _DEFAULT_HALLUCINATIONS)
+    use_clipboard: bool = _get_bool("SHEPTUN_USE_CLIPBOARD", True)
 
 
 settings = Settings()

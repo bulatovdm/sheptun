@@ -2,7 +2,11 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+import AppKit
 import Quartz
+
+NSPasteboard: Any = getattr(AppKit, "NSPasteboard")  # noqa: B009
+NSPasteboardTypeString: Any = getattr(AppKit, "NSPasteboardTypeString")  # noqa: B009
 
 CGEventCreateKeyboardEvent: Any = getattr(Quartz, "CGEventCreateKeyboardEvent")  # noqa: B009
 CGEventKeyboardSetUnicodeString: Any = getattr(  # noqa: B009
@@ -136,10 +140,42 @@ MODIFIER_FLAGS: dict[str, int] = {
 
 
 class MacOSKeyboardSender:
-    def __init__(self, key_delay: float = 0.005) -> None:
+    def __init__(self, key_delay: float = 0.005, use_clipboard: bool = True) -> None:
         self._key_delay = key_delay
+        self._use_clipboard = use_clipboard
+        self._pasteboard = NSPasteboard.generalPasteboard()
 
     def send_text(self, text: str) -> None:
+        if self._use_clipboard:
+            self._send_via_clipboard(text)
+        else:
+            self._send_via_events(text)
+
+    def _send_via_clipboard(self, text: str) -> None:
+        old_contents = self._get_clipboard()
+        old_change_count = self._pasteboard.changeCount()
+
+        self._set_clipboard(text)
+        self._paste()
+        time.sleep(0.05)
+
+        if old_contents is not None:
+            self._set_clipboard(old_contents)
+        elif self._pasteboard.changeCount() != old_change_count:
+            self._pasteboard.clearContents()
+
+    def _get_clipboard(self) -> str | None:
+        result: str | None = self._pasteboard.stringForType_(NSPasteboardTypeString)
+        return result
+
+    def _set_clipboard(self, text: str) -> None:
+        self._pasteboard.clearContents()
+        self._pasteboard.setString_forType_(text, NSPasteboardTypeString)
+
+    def _paste(self) -> None:
+        self._send_key_event(KEY_CODES["v"].code, kCGEventFlagMaskCommand)
+
+    def _send_via_events(self, text: str) -> None:
         for i in range(0, len(text), MAX_UNICODE_STRING_LENGTH):
             chunk = text[i : i + MAX_UNICODE_STRING_LENGTH]
             self._send_unicode_string(chunk)

@@ -214,7 +214,7 @@ class VoiceEngine(BaseVoiceEngine):
     ) -> "VoiceEngine":
         recognizer = WhisperRecognizer(model_name=model_name, device=device)
         command_parser = CommandParser.from_config_file(config_path)
-        keyboard_sender = MacOSKeyboardSender()
+        keyboard_sender = MacOSKeyboardSender(use_clipboard=settings.use_clipboard)
         status_indicator: ConsoleStatusIndicator | SimpleStatusIndicator = (
             ConsoleStatusIndicator() if use_live_status else SimpleStatusIndicator()
         )
