@@ -8,12 +8,12 @@ import rumps
 from sheptun.audio import AudioConfig, AudioRecorder, VoiceActivityConfig
 from sheptun.commands import CommandConfigLoader, CommandParser
 from sheptun.config import get_config_path
+from sheptun.engine import BaseVoiceEngine
 from sheptun.hotkeys import HotkeyManager
 from sheptun.i18n import t
 from sheptun.keyboard import MacOSKeyboardSender
 from sheptun.recognition import WhisperRecognizer
 from sheptun.settings import settings, setup_logging
-from sheptun.types import Action, ActionType
 
 setup_logging()
 logger = logging.getLogger("sheptun.menubar")
@@ -48,10 +48,10 @@ class MenubarStatusIndicator:
     def idle(self) -> None:
         self._app.set_listening(False)
 
-    def show_recognized(self, _text: str) -> None:
+    def show_recognized(self, text: str) -> None:
         pass
 
-    def show_action(self, _action_description: str) -> None:
+    def show_action(self, action_description: str) -> None:
         pass
 
     def show_help(self) -> None:
@@ -64,7 +64,7 @@ class MenubarStatusIndicator:
         subprocess.run(["osascript", "-e", script], check=False, capture_output=True)
 
 
-class MenubarVoiceEngine:
+class MenubarVoiceEngine(BaseVoiceEngine):
     def __init__(
         self,
         recognizer: WhisperRecognizer,
@@ -74,103 +74,17 @@ class MenubarVoiceEngine:
         audio_config: AudioConfig | None = None,
         vad_config: VoiceActivityConfig | None = None,
     ) -> None:
-        from sheptun.audio import ContinuousAudioRecorder
+        super().__init__(
+            recognizer=recognizer,
+            command_parser=command_parser,
+            keyboard_sender=keyboard_sender,
+            status_indicator=status_indicator,
+            audio_config=audio_config,
+            vad_config=vad_config,
+        )
 
-        self._recognizer = recognizer
-        self._command_parser = command_parser
-        self._keyboard = keyboard_sender
-        self._status = status_indicator
-        self._recorder = ContinuousAudioRecorder(audio_config, vad_config)
-        self._running = False
-        self._lock = threading.Lock()
-
-    def start(self) -> None:
-        with self._lock:
-            if self._running:
-                return
-            self._running = True
-
-        self._status.listening()
-        self._recorder.set_callback(self._on_speech_detected)
-        self._recorder.start()
-
-    def stop(self) -> None:
-        with self._lock:
-            if not self._running:
-                return
-            self._running = False
-
-        self._recorder.stop()
-        self._status.idle()
-
-    def is_running(self) -> bool:
-        with self._lock:
-            return self._running
-
-    def recognize_and_execute(self, audio_data: bytes) -> None:
-        try:
-            result = self._recognizer.recognize(audio_data, self._recorder.sample_rate)
-            if result and result.text:
-                logger.info(f"Recognized: '{result.text}'")
-                action = self._command_parser.parse(result.text)
-                if action:
-                    self._execute_action(action)
-        except Exception as e:
-            logger.exception(f"Recognition error: {e}")
-
-    def _on_speech_detected(self, audio_data: bytes) -> None:
-        if not self._running:
-            return
-
-        logger.debug(f"Speech detected: {len(audio_data)} bytes")
-        self._status.processing()
-
-        try:
-            result = self._recognizer.recognize(audio_data, self._recorder.sample_rate)
-
-            if result is None or not result.text:
-                logger.debug("Recognition returned empty result")
-                self._status.listening()
-                return
-
-            logger.info(f"Recognized: '{result.text}'")
-            action = self._command_parser.parse(result.text)
-            logger.debug(f"Parsed action: {action}")
-
-            if action is not None:
-                self._execute_action(action)
-
-        except Exception as e:
-            logger.exception(f"Error processing speech: {e}")
-
-        if self._running:
-            self._status.listening()
-
-    def _execute_action(self, action: Action) -> None:
-        logger.info(f"Executing action: {action.action_type.name} = {action.value}")
-        match action.action_type:
-            case ActionType.STOP:
-                self.stop()
-
-            case ActionType.TEXT:
-                if isinstance(action.value, str):
-                    self._keyboard.send_text(action.value)
-
-            case ActionType.KEY:
-                if isinstance(action.value, str):
-                    self._keyboard.send_key(action.value)
-
-            case ActionType.HOTKEY:
-                if isinstance(action.value, list):
-                    self._keyboard.send_hotkey(action.value)
-
-            case ActionType.SLASH:
-                if isinstance(action.value, str):
-                    self._keyboard.send_text(action.value)
-                    self._keyboard.send_key("return")
-
-            case ActionType.HELP:
-                self._status.show_help()
+    def _log(self, message: str) -> None:
+        logger.info(message)
 
 
 class SheptunMenubar(rumps.App):  # type: ignore[misc]
@@ -198,7 +112,9 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
 
         toggle_display = self._hotkey_manager.toggle_hotkey_display
         ptt_display = self._hotkey_manager.ptt_hotkey_display
-        self._toggle_menu_item = rumps.MenuItem(f"{t('menu_toggle')} ({toggle_display})", callback=self._toggle_listening)
+        self._toggle_menu_item = rumps.MenuItem(
+            f"{t('menu_toggle')} ({toggle_display})", callback=self._toggle_listening
+        )
         self._ptt_menu_item = rumps.MenuItem(f"{t('menu_ptt')} ({ptt_display})")
 
         self.menu = [
@@ -319,7 +235,9 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         self._hotkey_manager.stop()
 
         app_path = settings.app_path
-        subprocess.Popen(["open", str(app_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.Popen(
+            ["open", str(app_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
         os._exit(0)
 
     def _quit(self, _: Any) -> None:

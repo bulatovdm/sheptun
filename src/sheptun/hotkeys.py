@@ -127,11 +127,7 @@ class HotkeyManager:
             if self._on_toggle:
                 self._on_toggle()
 
-        if (
-            self._ptt_keys
-            and self._ptt_keys.issubset(self._pressed_keys)
-            and not self._ptt_active
-        ):
+        if self._ptt_keys and self._ptt_keys.issubset(self._pressed_keys) and not self._ptt_active:
             self._ptt_active = True
             logger.debug("PTT hotkey pressed")
             if self._on_ptt_start:
@@ -140,7 +136,11 @@ class HotkeyManager:
     def _on_release(self, key: Any) -> None:
         self._pressed_keys.discard(key)
 
-        if self._toggle_active and self._toggle_keys and not self._toggle_keys.issubset(self._pressed_keys):
+        if (
+            self._toggle_active
+            and self._toggle_keys
+            and not self._toggle_keys.issubset(self._pressed_keys)
+        ):
             self._toggle_active = False
 
         if self._ptt_active and self._ptt_keys and not self._ptt_keys.issubset(self._pressed_keys):

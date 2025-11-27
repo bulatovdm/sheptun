@@ -68,11 +68,12 @@ class TestCommandParser:
         assert action is not None
         assert action.action_type == ActionType.STOP
 
-    def test_parse_stop_command_in_phrase(self, parser: CommandParser) -> None:
+    def test_parse_stop_command_in_phrase_returns_text(self, parser: CommandParser) -> None:
         action = parser.parse("скажите стоп для выхода")
 
         assert action is not None
-        assert action.action_type == ActionType.STOP
+        assert action.action_type == ActionType.TEXT
+        assert action.value == "скажите стоп для выхода"
 
     def test_parse_stop_command_with_punctuation(self, parser: CommandParser) -> None:
         action = parser.parse("Стоп!")

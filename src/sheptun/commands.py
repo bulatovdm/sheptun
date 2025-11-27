@@ -8,6 +8,7 @@ import yaml
 from sheptun.types import Action, ActionType
 
 PUNCTUATION_PATTERN = re.compile(r"[^\w\s]", re.UNICODE)
+SLASH_PREFIXES = ("слэш ", "слышь ", "слеш ")
 
 
 @dataclass
@@ -129,10 +130,9 @@ class CommandParser:
         return self._config.control_commands.get(normalized)
 
     def _try_parse_slash(self, normalized: str) -> Action | None:
-        slash_prefixes = ("слэш ", "слышь ", "слеш ")
         command_part: str | None = None
 
-        for prefix in slash_prefixes:
+        for prefix in SLASH_PREFIXES:
             if normalized.startswith(prefix):
                 command_part = normalized[len(prefix) :].strip()
                 break

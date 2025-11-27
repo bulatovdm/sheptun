@@ -6,11 +6,7 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
-HELP_TEXT = """энтер, таб, эскейп, пробел
-вверх, вниз, влево, вправо
-удали, удали слово, удали строку
-клир - /clear
-стоп - остановить"""
+from sheptun.i18n import t
 
 
 def _send_notification(title: str, message: str) -> None:
@@ -83,9 +79,9 @@ class ConsoleStatusIndicator:
 
     def show_help(self) -> None:
         self._console.print("\n[bold cyan]Доступные команды:[/bold cyan]")
-        self._console.print(HELP_TEXT)
+        self._console.print(t("help_commands"))
         self._console.print()
-        _send_notification("Sheptun - Команды", "Справка выведена в консоль")
+        _send_notification(t("help_title"), "Справка выведена в консоль")
 
     def _update_status(self, status: Status) -> None:
         self._status = status
@@ -136,6 +132,6 @@ class SimpleStatusIndicator:
 
     def show_help(self) -> None:
         self._console.print("\n[bold cyan]Доступные команды:[/bold cyan]")
-        self._console.print(HELP_TEXT)
+        self._console.print(t("help_commands"))
         self._console.print()
-        _send_notification("Sheptun - Команды", "Справка выведена в консоль")
+        _send_notification(t("help_title"), "Справка выведена в консоль")

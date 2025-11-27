@@ -193,20 +193,6 @@ class MacOSKeyboardSender:
 
         self._send_key_event(key_code.code, modifier_flags)
 
-    def _send_character(self, char: str) -> None:
-        if char.isupper():
-            key_code = KEY_CODES.get(char.lower())
-            if key_code is not None:
-                self._send_key_event(key_code.code, kCGEventFlagMaskShift)
-            return
-
-        key_code = KEY_CODES.get(char)
-        if key_code is None:
-            return
-
-        flags = kCGEventFlagMaskShift if key_code.needs_shift else 0
-        self._send_key_event(key_code.code, flags)
-
     def _send_key_event(self, key_code: int, flags: int = 0) -> None:
         key_down = CGEventCreateKeyboardEvent(None, key_code, True)
         key_up = CGEventCreateKeyboardEvent(None, key_code, False)
