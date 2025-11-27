@@ -28,6 +28,13 @@ def _get_optional_str(key: str) -> str | None:
     return value if value else None
 
 
+def _get_path(key: str, default: Path) -> Path:
+    return Path(_get_str(key, str(default))).expanduser()
+
+
+_DEFAULT_DATASET_PATH = Path("dataset")
+
+
 @dataclass(frozen=True)
 class Settings:
     model: str = _get_str("SHEPTUN_MODEL", "base")
@@ -42,6 +49,8 @@ class Settings:
     debug: bool = _get_bool("SHEPTUN_DEBUG", False)
     log_file: Path = Path(_get_str("SHEPTUN_LOG_FILE", "logs/sheptun.log"))
     app_path: Path = Path(_get_str("SHEPTUN_APP_PATH", "/Applications/Sheptun.app"))
+    record_dataset: bool = _get_bool("SHEPTUN_RECORD_DATASET", False)
+    dataset_path: Path = _get_path("SHEPTUN_DATASET_PATH", _DEFAULT_DATASET_PATH)
 
 
 settings = Settings()

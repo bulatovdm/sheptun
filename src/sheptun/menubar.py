@@ -73,6 +73,7 @@ class MenubarVoiceEngine(BaseVoiceEngine):
         status_indicator: MenubarStatusIndicator,
         audio_config: AudioConfig | None = None,
         vad_config: VoiceActivityConfig | None = None,
+        record_dataset: bool = False,
     ) -> None:
         super().__init__(
             recognizer=recognizer,
@@ -81,6 +82,7 @@ class MenubarVoiceEngine(BaseVoiceEngine):
             status_indicator=status_indicator,
             audio_config=audio_config,
             vad_config=vad_config,
+            record_dataset=record_dataset,
         )
 
     def _log(self, message: str) -> None:
@@ -211,6 +213,7 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
             command_parser=command_parser,
             keyboard_sender=keyboard_sender,
             status_indicator=status_indicator,
+            record_dataset=settings.record_dataset,
         )
 
     def _toggle_listening(self, _sender: rumps.MenuItem) -> None:

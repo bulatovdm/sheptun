@@ -80,6 +80,9 @@ ignore = [
 [tool.ruff.lint.isort]
 known-first-party = ["sheptun"]
 
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["sheptun.settings._get_path"]
+
 [tool.mypy]
 python_version = "3.11"
 strict = true

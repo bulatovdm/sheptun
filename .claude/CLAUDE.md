@@ -28,6 +28,7 @@ sheptun install-app         # Create menubar app
 sheptun restart             # Restart menubar app
 sheptun list-models         # Show downloaded Whisper models
 sheptun cleanup-models      # Remove unused models
+sheptun clear-dataset       # Clear dataset for fine-tuning
 ```
 
 ## Architecture

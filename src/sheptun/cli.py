@@ -375,5 +375,40 @@ def install_app(
     _hint("Теперь можно запустить из Launchpad или Finder")
 
 
+@app.command()
+def clear_dataset(
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help="Пропустить подтверждение",
+        ),
+    ] = False,
+) -> None:
+    """Очистить датасет для fine-tuning."""
+    from sheptun.dataset import DatasetRecorder
+
+    recorder = DatasetRecorder()
+    stats = recorder.get_stats()
+
+    if stats["audio_files"] == 0:
+        _hint("Датасет пуст")
+        return
+
+    console.print(f"\n[bold]Датасет:[/bold] {settings.dataset_path}")
+    console.print(f"  Аудио файлов: {stats['audio_files']}")
+    console.print(f"  Транскрипций: {stats['transcripts']}\n")
+
+    if not force:
+        confirm = typer.confirm("Удалить все данные?", default=False)
+        if not confirm:
+            _hint("Отменено")
+            return
+
+    recorder.clear()
+    _success("Датасет очищен")
+
+
 if __name__ == "__main__":
     app()

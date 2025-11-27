@@ -20,6 +20,7 @@ sheptun test-mic            # Проверка микрофона
 sheptun list-commands       # Список команд
 sheptun list-models         # Показать загруженные модели
 sheptun cleanup-models      # Удалить неиспользуемые модели
+sheptun clear-dataset       # Очистить датасет для fine-tuning
 ```
 
 ### Menubar приложение (macOS)
@@ -78,6 +79,10 @@ SHEPTUN_LOG_FILE=logs/sheptun.log # Путь к файлу логов
 
 # Приложение
 SHEPTUN_APP_PATH=/Applications/Sheptun.app
+
+# Сбор данных для fine-tuning
+SHEPTUN_RECORD_DATASET=false      # Записывать аудио и транскрипции
+SHEPTUN_DATASET_PATH=dataset      # Относительно директории запуска
 ```
 
 ## Голосовые команды

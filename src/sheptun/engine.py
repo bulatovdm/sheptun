@@ -4,8 +4,10 @@ from pathlib import Path
 
 from sheptun.audio import AudioConfig, ContinuousAudioRecorder, VoiceActivityConfig
 from sheptun.commands import CommandParser
+from sheptun.dataset import DatasetRecorder
 from sheptun.keyboard import MacOSKeyboardSender
 from sheptun.recognition import WhisperRecognizer
+from sheptun.settings import settings
 from sheptun.status import ConsoleStatusIndicator, SimpleStatusIndicator
 from sheptun.types import Action, ActionType, KeyboardSender, SpeechRecognizer, StatusIndicator
 
@@ -21,12 +23,14 @@ class BaseVoiceEngine:
         status_indicator: StatusIndicator,
         audio_config: AudioConfig | None = None,
         vad_config: VoiceActivityConfig | None = None,
+        record_dataset: bool = False,
     ) -> None:
         self._recognizer = recognizer
         self._command_parser = command_parser
         self._keyboard = keyboard_sender
         self._status = status_indicator
         self._recorder = ContinuousAudioRecorder(audio_config, vad_config)
+        self._dataset_recorder = DatasetRecorder() if record_dataset else None
         self._running = False
         self._lock = threading.Lock()
 
@@ -62,6 +66,7 @@ class BaseVoiceEngine:
             result = self._recognizer.recognize(audio_data, self._recorder.sample_rate)
             if result and result.text:
                 self._log(f"Recognized: '{result.text}'")
+                self._save_to_dataset(audio_data, result.text)
                 action = self._command_parser.parse(result.text)
                 if action:
                     self._execute_action(action)
@@ -76,6 +81,17 @@ class BaseVoiceEngine:
 
     def _log(self, message: str) -> None:
         logger.debug(message)
+
+    def _save_to_dataset(self, audio_data: bytes, text: str) -> None:
+        if self._dataset_recorder is None:
+            return
+
+        import numpy as np
+
+        audio_int16 = np.frombuffer(audio_data, dtype=np.int16)
+        audio_float = audio_int16.astype(np.float32) / 32768.0
+        path = self._dataset_recorder.save(audio_float, text)
+        self._log(f"Saved to dataset: {path}")
 
     def _on_speech_detected(self, audio_data: bytes) -> None:
         if not self._running:
@@ -94,6 +110,7 @@ class BaseVoiceEngine:
 
             self._log(f"Recognized: '{result.text}'")
             self._status.show_recognized(result.text)
+            self._save_to_dataset(audio_data, result.text)
             action = self._command_parser.parse(result.text)
             self._log(f"Parsed action: {action}")
 
@@ -152,6 +169,7 @@ class VoiceEngine(BaseVoiceEngine):
         audio_config: AudioConfig | None = None,
         vad_config: VoiceActivityConfig | None = None,
         debug: bool = False,
+        record_dataset: bool = False,
     ) -> None:
         super().__init__(
             recognizer=recognizer,
@@ -160,6 +178,7 @@ class VoiceEngine(BaseVoiceEngine):
             status_indicator=status_indicator,
             audio_config=audio_config,
             vad_config=vad_config,
+            record_dataset=record_dataset,
         )
         self._stop_requested = False
         self._debug = debug
@@ -186,6 +205,7 @@ class VoiceEngine(BaseVoiceEngine):
             keyboard_sender=keyboard_sender,
             status_indicator=status_indicator,
             debug=debug,
+            record_dataset=settings.record_dataset,
         )
 
     def _on_start(self) -> None:

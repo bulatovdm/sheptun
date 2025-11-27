@@ -47,6 +47,9 @@ htmlcov/
 # Logs
 logs/
 
+# Dataset for fine-tuning (default path)
+dataset/
+
 # OS
 .DS_Store
 Thumbs.db
