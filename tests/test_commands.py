@@ -1,6 +1,9 @@
+import tempfile
+from pathlib import Path
+
 import pytest
 
-from sheptun.commands import CommandConfig, CommandParser
+from sheptun.commands import CommandConfig, CommandConfigLoader, CommandParser
 from sheptun.types import Action, ActionType
 
 
@@ -146,3 +149,129 @@ class TestCommandParser:
         assert action is not None
         assert action.action_type == ActionType.TEXT
         assert action.value == "Hello World"
+
+    def test_parse_help_command(self) -> None:
+        config = CommandConfig(help_commands={"помощь", "команды"})
+        parser = CommandParser(config)
+
+        action = parser.parse("помощь")
+
+        assert action is not None
+        assert action.action_type == ActionType.HELP
+
+    def test_parse_dictation_empty_after_prefix(self) -> None:
+        config = CommandConfig(dictation_prefixes=["скажи"])
+        parser = CommandParser(config)
+
+        action = parser.parse("скажи ")
+
+        assert action is not None
+        assert action.action_type == ActionType.TEXT
+        assert action.value == "скажи"
+
+
+class TestCommandConfig:
+    def test_default_values(self) -> None:
+        config = CommandConfig()
+
+        assert config.control_commands == {}
+        assert config.stop_commands == set()
+        assert config.slash_commands == {}
+        assert config.dictation_prefixes == []
+        assert config.help_commands == set()
+
+
+class TestCommandConfigLoader:
+    def test_load_from_yaml_file(self) -> None:
+        yaml_content = """
+control_commands:
+  клод:
+    type: text
+    value: claude
+  таб:
+    type: key
+    value: tab
+stop_commands:
+  - стоп
+  - хватит
+slash_commands:
+  хелп: /help
+dictation_prefixes:
+  - скажи
+help_commands:
+  - команды
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config = CommandConfigLoader.load(Path(f.name))
+
+        assert "клод" in config.control_commands
+        assert config.control_commands["клод"].action_type == ActionType.TEXT
+        assert config.control_commands["клод"].value == "claude"
+        assert "таб" in config.control_commands
+        assert config.stop_commands == {"стоп", "хватит"}
+        assert config.slash_commands == {"хелп": "/help"}
+        assert config.dictation_prefixes == ["скажи"]
+        assert config.help_commands == {"команды"}
+
+    def test_load_with_hotkey_action(self) -> None:
+        yaml_content = """
+control_commands:
+  шифт таб:
+    type: hotkey
+    value:
+      - shift
+      - tab
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config = CommandConfigLoader.load(Path(f.name))
+
+        assert "шифт таб" in config.control_commands
+        assert config.control_commands["шифт таб"].action_type == ActionType.HOTKEY
+        assert config.control_commands["шифт таб"].value == ["shift", "tab"]
+
+    def test_load_ignores_unknown_action_type(self) -> None:
+        yaml_content = """
+control_commands:
+  unknown:
+    type: unknown_type
+    value: test
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config = CommandConfigLoader.load(Path(f.name))
+
+        assert "unknown" not in config.control_commands
+
+    def test_load_empty_config(self) -> None:
+        yaml_content = "{}"
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config = CommandConfigLoader.load(Path(f.name))
+
+        assert config.control_commands == {}
+        assert config.stop_commands == set()
+
+
+class TestCommandParserFromFile:
+    def test_from_config_file(self) -> None:
+        yaml_content = """
+control_commands:
+  тест:
+    type: text
+    value: test
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            parser = CommandParser.from_config_file(Path(f.name))
+
+        action = parser.parse("тест")
+        assert action is not None
+        assert action.value == "test"

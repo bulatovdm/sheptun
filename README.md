@@ -41,8 +41,15 @@ sheptun restart             # Перезапустить приложение
 Скрипт `run.sh` позволяет запустить sheptun из корня проекта:
 
 ```bash
+./run.sh                    # Показать справку
 ./run.sh listen             # Запуск CLI
-./run.sh menubar            # Запуск menubar
+./run.sh install-app        # Установить menubar приложение
+
+# Разработка
+./run.sh check              # Запустить все проверки (ruff, mypy, pyright)
+./run.sh test               # Запустить тесты
+./run.sh format             # Отформатировать код
+./run.sh coverage           # Тесты с покрытием
 ```
 
 ## Конфигурация

@@ -34,14 +34,19 @@ sheptun cleanup-models      # Remove unused models
 
 ```
 src/sheptun/
-├── cli.py          # Typer CLI
+├── cli.py          # Typer CLI entry point
 ├── menubar.py      # macOS menubar app (rumps)
-├── engine.py       # VoiceEngine orchestrator
-├── audio.py        # Audio recording + VAD
+├── engine.py       # VoiceEngine orchestrator (BaseVoiceEngine)
+├── audio.py        # Audio recording + VAD (EnergyVAD, SileroVAD)
 ├── recognition.py  # WhisperRecognizer
-├── commands.py     # CommandParser + YAML loader
-├── keyboard.py     # MacOSKeyboardSender (Quartz)
+├── commands.py     # CommandParser + YAML config loader
+├── keyboard.py     # MacOSKeyboardSender (Quartz), FocusAwareKeyboardSender
+├── focus.py        # FocusTracker for PTT mode (NSWorkspace)
+├── hotkeys.py      # HotkeyManager (pynput) for global hotkeys
+├── status.py       # Console status indicators (Rich)
 ├── settings.py     # Settings from .env
+├── i18n.py         # Russian translations
+├── app_builder.py  # macOS .app bundle builder
 └── types.py        # Protocols, dataclasses, enums
 ```
 
