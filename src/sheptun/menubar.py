@@ -1,17 +1,15 @@
 import importlib.resources
-import json
 import logging
 import threading
-from enum import Enum
-from pathlib import Path
 from typing import Any
 
 import rumps
-from pynput import keyboard
 
-from sheptun.audio import AudioConfig, VoiceActivityConfig
+from sheptun.audio import AudioConfig, AudioRecorder, VoiceActivityConfig
 from sheptun.commands import CommandConfigLoader, CommandParser
 from sheptun.config import get_config_path
+from sheptun.hotkeys import HotkeyManager
+from sheptun.i18n import t
 from sheptun.keyboard import MacOSKeyboardSender
 from sheptun.recognition import WhisperRecognizer
 from sheptun.settings import settings, setup_logging
@@ -19,54 +17,6 @@ from sheptun.types import Action, ActionType
 
 setup_logging()
 logger = logging.getLogger("sheptun.menubar")
-
-PREFS_FILE = Path.home() / ".config" / "sheptun" / "menubar_prefs.json"
-
-
-class HotkeyMode(Enum):
-    TOGGLE = "toggle"
-    PUSH_TO_TALK = "push_to_talk"
-
-
-def _load_prefs() -> dict[str, Any]:
-    """Load preferences from file."""
-    if PREFS_FILE.exists():
-        try:
-            return json.loads(PREFS_FILE.read_text())  # type: ignore[no-any-return]
-        except Exception:
-            pass
-    return {}
-
-
-def _save_prefs(prefs: dict[str, Any]) -> None:
-    """Save preferences to file."""
-    PREFS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    PREFS_FILE.write_text(json.dumps(prefs))
-
-
-def _parse_hotkey(hotkey_str: str) -> set[Any] | None:
-    """Parse hotkey string like '<cmd>+<shift>+m' into set of keys."""
-    try:
-        keys: set[Any] = set()
-        for part in hotkey_str.split("+"):
-            part = part.strip().lower()
-            if part == "<cmd>":
-                keys.add(keyboard.Key.cmd)
-            elif part == "<shift>":
-                keys.add(keyboard.Key.shift)
-            elif part == "<ctrl>":
-                keys.add(keyboard.Key.ctrl)
-            elif part == "<alt>":
-                keys.add(keyboard.Key.alt)
-            elif len(part) == 1:
-                keys.add(keyboard.KeyCode.from_char(part))
-            else:
-                logger.warning(f"Unknown hotkey part: {part}")
-                return None
-        return keys
-    except Exception as e:
-        logger.warning(f"Failed to parse hotkey '{hotkey_str}': {e}")
-        return None
 
 
 def _get_icon_path(name: str) -> str:
@@ -93,7 +43,7 @@ class MenubarStatusIndicator:
         self._app.set_processing()
 
     def error(self, message: str) -> None:
-        self._app.show_notification("Ошибка", message)
+        self._app.show_notification(t("notification_error"), message)
 
     def idle(self) -> None:
         self._app.set_listening(False)
@@ -108,8 +58,9 @@ class MenubarStatusIndicator:
         import subprocess
 
         logger.info("Showing help notification")
-        message = "энтер, таб, эскейп, пробел, вверх, вниз, влево, вправо, удали, клир, стоп"
-        script = f'display notification "{message}" with title "Sheptun - Команды"'
+        message = t("help_commands")
+        title = t("help_title")
+        script = f'display notification "{message}" with title "{title}"'
         subprocess.run(["osascript", "-e", script], check=False, capture_output=True)
 
 
@@ -229,99 +180,54 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         self._model_name = model_name
         self._engine: MenubarVoiceEngine | None = None
         self._is_listening = False
-        self._hotkey_listener: keyboard.Listener | None = None
-        self._hotkey_keys: set[Any] = _parse_hotkey(settings.hotkey) or set()
-        self._pressed_keys: set[Any] = set()
-        self._hotkey_active = False
-
-        prefs = _load_prefs()
-        mode_str = prefs.get("hotkey_mode", HotkeyMode.TOGGLE.value)
-        self._hotkey_mode = HotkeyMode(mode_str) if mode_str in [m.value for m in HotkeyMode] else HotkeyMode.TOGGLE
+        self._ptt_recorder: AudioRecorder | None = None
 
         self._icon_idle = _get_icon_path("mic_idle.png")
         self._icon_listening = _get_icon_path("mic_active.png")
         self._icon_processing = _get_icon_path("mic_processing.png")
-
         self.icon = self._icon_idle
-        hotkey_display = settings.hotkey.replace("<cmd>", "⌘").replace("<shift>", "⇧").replace("<ctrl>", "⌃").replace("<alt>", "⌥").upper()
-        self._start_menu_item = rumps.MenuItem(f"Начать слушать ({hotkey_display})", callback=self._toggle_listening)
 
-        self._mode_toggle = rumps.MenuItem("Toggle (вкл/выкл)", callback=self._set_mode_toggle)
-        self._mode_ptt = rumps.MenuItem("Push-to-talk (удерживать)", callback=self._set_mode_ptt)
-        self._update_mode_menu()
+        self._hotkey_manager = HotkeyManager(
+            toggle_hotkey=settings.hotkey_toggle,
+            ptt_hotkey=settings.hotkey_ptt,
+        )
+        self._hotkey_manager.set_callbacks(
+            on_toggle=self._on_toggle_hotkey,
+            on_ptt_start=self._on_ptt_start,
+            on_ptt_stop=self._on_ptt_stop,
+        )
+
+        toggle_display = self._hotkey_manager.toggle_hotkey_display
+        ptt_display = self._hotkey_manager.ptt_hotkey_display
+        self._toggle_menu_item = rumps.MenuItem(f"{t('menu_toggle')} ({toggle_display})", callback=self._toggle_listening)
+        self._ptt_menu_item = rumps.MenuItem(f"{t('menu_ptt')} ({ptt_display})")
 
         self.menu = [
-            self._start_menu_item,
+            self._toggle_menu_item,
+            self._ptt_menu_item,
             None,
-            ["Режим хоткея", [self._mode_toggle, self._mode_ptt]],
-            None,
-            rumps.MenuItem("Перезапустить", callback=self._restart),
-            rumps.MenuItem("Выход", callback=self._quit),
+            rumps.MenuItem(t("menu_restart"), callback=self._restart),
+            rumps.MenuItem(t("menu_quit"), callback=self._quit),
         ]
-        self._start_hotkey_listener()
+        self._hotkey_manager.start()
 
-    def _update_mode_menu(self) -> None:
-        self._mode_toggle.state = self._hotkey_mode == HotkeyMode.TOGGLE
-        self._mode_ptt.state = self._hotkey_mode == HotkeyMode.PUSH_TO_TALK
+    def _on_toggle_hotkey(self) -> None:
+        logger.info("Toggle hotkey pressed")
+        self._toggle_listening(self._toggle_menu_item)
 
-    def _set_mode_toggle(self, _: Any) -> None:
-        self._hotkey_mode = HotkeyMode.TOGGLE
-        self._update_mode_menu()
-        _save_prefs({"hotkey_mode": self._hotkey_mode.value})
-        logger.info("Switched to toggle mode")
+    def _on_ptt_start(self) -> None:
+        logger.info("PTT hotkey pressed")
+        self._ensure_engine_initialized()
 
-    def _set_mode_ptt(self, _: Any) -> None:
-        self._hotkey_mode = HotkeyMode.PUSH_TO_TALK
-        self._update_mode_menu()
-        _save_prefs({"hotkey_mode": self._hotkey_mode.value})
-        logger.info("Switched to push-to-talk mode")
-
-    def _start_hotkey_listener(self) -> None:
-        if not self._hotkey_keys:
-            logger.warning("No hotkey configured, skipping listener")
-            return
-
-        def on_press(key: Any) -> None:
-            self._pressed_keys.add(key)
-            if self._hotkey_keys.issubset(self._pressed_keys) and not self._hotkey_active:
-                self._hotkey_active = True
-                if self._hotkey_mode == HotkeyMode.TOGGLE:
-                    logger.info("Hotkey pressed, toggling listening")
-                    self._toggle_listening(self._start_menu_item)
-                else:
-                    logger.info("Hotkey pressed, starting push-to-talk")
-                    self._start_ptt()
-
-        def on_release(key: Any) -> None:
-            self._pressed_keys.discard(key)
-            if self._hotkey_active and not self._hotkey_keys.issubset(self._pressed_keys):
-                self._hotkey_active = False
-                if self._hotkey_mode == HotkeyMode.PUSH_TO_TALK:
-                    logger.info("Hotkey released, stopping push-to-talk")
-                    self._stop_ptt()
-
-        self._hotkey_listener = keyboard.Listener(on_press=on_press, on_release=on_release)
-        self._hotkey_listener.start()
-        logger.info(f"Hotkey listener started for {settings.hotkey}")
-
-    def _start_ptt(self) -> None:
-        """Start push-to-talk recording."""
-        from sheptun.audio import AudioRecorder
-
-        if self._engine is None:
-            self.icon = self._icon_processing
-            self.show_notification("Sheptun", "Загрузка модели...")
-            self._init_engine()
-
-        if not hasattr(self, "_ptt_recorder"):
+        if self._ptt_recorder is None:
             self._ptt_recorder = AudioRecorder()
 
         self.icon = self._icon_listening
         self._ptt_recorder.start()
 
-    def _stop_ptt(self) -> None:
-        """Stop push-to-talk and process audio."""
-        if not hasattr(self, "_ptt_recorder"):
+    def _on_ptt_stop(self) -> None:
+        logger.info("PTT hotkey released")
+        if self._ptt_recorder is None:
             return
 
         audio_data = self._ptt_recorder.stop()
@@ -333,9 +239,7 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         threading.Thread(target=self._process_ptt_audio, args=(audio_data,), daemon=True).start()
 
     def _process_ptt_audio(self, audio_data: bytes) -> None:
-        """Process push-to-talk audio in background."""
-        if self._engine is None:
-            self._init_engine()
+        self._ensure_engine_initialized()
 
         if self._engine is None:
             self.icon = self._icon_idle
@@ -347,6 +251,12 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
             logger.exception(f"PTT error: {e}")
         finally:
             self.icon = self._icon_idle
+
+    def _ensure_engine_initialized(self) -> None:
+        if self._engine is None:
+            self.icon = self._icon_processing
+            self.show_notification("Sheptun", t("notification_loading"))
+            self._init_engine()
 
     def _init_engine(self) -> None:
         if self._engine is not None:
@@ -366,23 +276,30 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
             status_indicator=status_indicator,
         )
 
-    def _toggle_listening(self, sender: rumps.MenuItem) -> None:
+    def _toggle_listening(self, _sender: rumps.MenuItem) -> None:
         if self._engine is None:
             self.icon = self._icon_processing
-            self.show_notification("Sheptun", "Загрузка модели...")
+            self.show_notification("Sheptun", t("notification_loading"))
             threading.Thread(target=self._init_and_start, daemon=True).start()
         elif self._is_listening:
             self._engine.stop()
-            sender.title = "Начать слушать"
+            self._update_toggle_menu_title()
         else:
             self._engine.start()
-            sender.title = "Остановить"
+            self._update_toggle_menu_title()
 
     def _init_and_start(self) -> None:
         self._init_engine()
         if self._engine is not None:
             self._engine.start()
-            self._start_menu_item.title = "Остановить"
+            self._update_toggle_menu_title()
+
+    def _update_toggle_menu_title(self) -> None:
+        toggle_display = self._hotkey_manager.toggle_hotkey_display
+        if self._is_listening:
+            self._toggle_menu_item.title = f"{t('menu_toggle_stop')} ({toggle_display})"
+        else:
+            self._toggle_menu_item.title = f"{t('menu_toggle')} ({toggle_display})"
 
     def set_listening(self, listening: bool) -> None:
         self._is_listening = listening
@@ -400,8 +317,7 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
 
         if self._engine is not None:
             self._engine.stop()
-        if self._hotkey_listener is not None:
-            self._hotkey_listener.stop()
+        self._hotkey_manager.stop()
 
         app_path = settings.app_path
         subprocess.Popen(["open", str(app_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -410,13 +326,11 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
     def _quit(self, _: Any) -> None:
         if self._engine is not None:
             self._engine.stop()
-        if self._hotkey_listener is not None:
-            self._hotkey_listener.stop()
+        self._hotkey_manager.stop()
         rumps.quit_application()  # type: ignore[no-untyped-call]
 
 
 def _hide_dock_icon() -> None:
-    """Hide the app icon from the Dock."""
     try:
         import AppKit  # type: ignore[import-untyped]
 

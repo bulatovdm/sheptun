@@ -39,7 +39,8 @@ class Settings:
     min_speech_duration: float = _get_float("SHEPTUN_MIN_SPEECH_DURATION", 0.2)
     max_speech_duration: float = _get_float("SHEPTUN_MAX_SPEECH_DURATION", 30.0)
     vad_type: str = _get_str("SHEPTUN_VAD_TYPE", "energy")  # energy | silero
-    hotkey: str = _get_str("SHEPTUN_HOTKEY", "<cmd>+<shift>+m")
+    hotkey_toggle: str = _get_str("SHEPTUN_HOTKEY_TOGGLE", "<ctrl>+<alt>+s")
+    hotkey_ptt: str = _get_str("SHEPTUN_HOTKEY_PTT", "<ctrl>+<alt>+<space>")
     debug: bool = _get_bool("SHEPTUN_DEBUG", False)
     log_file: Path = Path(_get_str("SHEPTUN_LOG_FILE", "logs/sheptun.log"))
     app_path: Path = Path(_get_str("SHEPTUN_APP_PATH", "/Applications/Sheptun.app"))
