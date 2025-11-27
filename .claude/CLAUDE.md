@@ -57,6 +57,32 @@ Command config: `./sheptun.yaml` or `~/.config/sheptun/commands.yaml`
 - Quartz CGEventCreateKeyboardEvent for keyboard simulation
 - Settings loaded once at import via dotenv (restart needed for changes)
 
+## Code Style
+
+### Principles
+- **SOLID** — single responsibility, open/closed, dependency inversion
+- **DRY** — don't repeat yourself, extract common logic
+- **KISS** — keep it simple, avoid over-engineering
+- **YAGNI** — don't add features until needed
+
+### Structure
+- Early return — exit early to avoid deep nesting
+- Small functions — split large functions into focused methods
+- Flat is better than nested — max 2-3 levels of indentation
+- One thing per function — each function does one thing well
+
+### Naming
+- Self-documenting code — names should explain intent
+- No comments for obvious code — let the code speak
+- Docstrings only when needed — don't duplicate method names
+- Docstrings required for CLI commands (used by `--help`)
+
+### Avoid
+- Magic numbers — use named constants
+- Unused code — delete it, don't comment out
+- Deep nesting — refactor with early returns or extract methods
+- Long parameter lists — use dataclasses or config objects
+
 ## Git Commits
 
 Do not add Co-Authored-By or emoji badges to commit messages.

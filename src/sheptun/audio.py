@@ -143,27 +143,27 @@ class SileroVAD:
     """Silero neural network Voice Activity Detector."""
 
     def __init__(self, config: VoiceActivityConfig) -> None:
-        from silero_vad import load_silero_vad
+        from silero_vad import load_silero_vad  # type: ignore[import-untyped]
 
         self.config = config
-        self._model = load_silero_vad()
+        self._model = load_silero_vad()  # type: ignore[no-untyped-call]
         self._silence_samples = 0
         self._speech_samples = 0
         self._is_speaking = False
 
     def reset(self) -> None:
-        self._model.reset_states()
+        self._model.reset_states()  # type: ignore[union-attr]
         self._silence_samples = 0
         self._speech_samples = 0
         self._is_speaking = False
 
     def process_chunk(self, audio_chunk: bytes, sample_rate: int) -> bool:
-        import torch
+        import torch  # type: ignore[import-untyped]
 
         audio_array = np.frombuffer(audio_chunk, dtype=np.int16).astype(np.float32) / 32768.0
-        audio_tensor = torch.from_numpy(audio_array)
+        audio_tensor = torch.from_numpy(audio_array)  # type: ignore[no-untyped-call]
 
-        speech_prob = self._model(audio_tensor, sample_rate).item()
+        speech_prob: float = self._model(audio_tensor, sample_rate).item()  # type: ignore[union-attr]
 
         if speech_prob > 0.5:
             self._speech_samples += len(audio_array)

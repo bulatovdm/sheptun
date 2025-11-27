@@ -101,7 +101,7 @@ class HotkeyManager:
         )
         self._listener.start()
 
-        hotkeys = []
+        hotkeys: list[str] = []
         if self._toggle_keys:
             hotkeys.append(f"toggle={self._toggle_hotkey_str}")
         if self._ptt_keys:
