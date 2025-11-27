@@ -18,6 +18,8 @@ sheptun listen -m medium    # С указанной моделью Whisper
 sheptun listen --debug      # С логированием
 sheptun test-mic            # Проверка микрофона
 sheptun list-commands       # Список команд
+sheptun list-models         # Показать загруженные модели
+sheptun cleanup-models      # Удалить неиспользуемые модели
 ```
 
 ### Menubar приложение (macOS)
@@ -29,18 +31,46 @@ sheptun restart             # Перезапустить приложение
 
 После установки Sheptun появится в menubar. Приложение работает в фоне без терминала.
 
-**Горячая клавиша:** `Ctrl+Option+S` — включить/выключить запись.
+### Горячие клавиши
+
+- **Toggle** (`Ctrl+Option+S`) — включить/выключить запись
+- **Push-to-talk** (`Ctrl+Option+Space`) — удерживать для записи
+
+### Быстрый запуск
+
+Скрипт `run.sh` позволяет запустить sheptun из корня проекта:
+
+```bash
+./run.sh listen             # Запуск CLI
+./run.sh menubar            # Запуск menubar
+```
 
 ## Конфигурация
 
 Создайте файл `.env` в корне проекта или настройте переменные окружения:
 
 ```bash
-SHEPTUN_MODEL=medium              # Модель: tiny, base, small, medium, large
-SHEPTUN_DEVICE=                   # Устройство: cpu, cuda, mps (auto если пусто)
-SHEPTUN_SILENCE_DURATION=0.3      # Пауза для определения конца фразы (сек)
+# Модель Whisper
+SHEPTUN_MODEL=medium              # tiny, base, small, medium, large
+SHEPTUN_DEVICE=                   # cpu, cuda, mps (auto если пусто)
+
+# Voice Activity Detection
+SHEPTUN_VAD_TYPE=energy           # energy или silero
+SHEPTUN_ENERGY_THRESHOLD=0.01     # Порог энергии для energy VAD
+SHEPTUN_SILENCE_DURATION=0.5      # Пауза для определения конца фразы (сек)
+SHEPTUN_MIN_SPEECH_DURATION=0.2   # Минимальная длительность речи (сек)
+SHEPTUN_MAX_SPEECH_DURATION=30.0  # Максимальная длительность речи (сек)
+
+# Горячие клавиши (menubar)
+SHEPTUN_HOTKEY_TOGGLE=<ctrl>+<alt>+s       # Toggle режим
+SHEPTUN_HOTKEY_PTT=<ctrl>+<alt>+<space>    # Push-to-talk режим
+
+# Отладка
 SHEPTUN_DEBUG=false               # Включить логирование
-SHEPTUN_HOTKEY=<ctrl>+<alt>+s     # Горячая клавиша для menubar
+SHEPTUN_LOG_FILE=logs/sheptun.log # Путь к файлу логов
+
+# Приложение
+SHEPTUN_APP_PATH=/Applications/Sheptun.app
 ```
 
 ## Голосовые команды
