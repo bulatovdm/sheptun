@@ -14,6 +14,7 @@ from sheptun.i18n import t
 from sheptun.keyboard import FocusAwareKeyboardSender, MacOSKeyboardSender
 from sheptun.recognition import WhisperRecognizer
 from sheptun.settings import settings, setup_logging
+from sheptun.types import AppState
 
 setup_logging()
 logger = logging.getLogger("sheptun.menubar")
@@ -94,7 +95,8 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         super().__init__("Sheptun", quit_button=None, template=True)  # type: ignore[arg-type]
         self._model_name = model_name
         self._engine: MenubarVoiceEngine | None = None
-        self._is_listening = False
+        self._state = AppState.IDLE
+        self._state_lock = threading.Lock()
         self._ptt_recorder: AudioRecorder | None = None
         self._ptt_keyboard: FocusAwareKeyboardSender | None = None
 
@@ -135,6 +137,13 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
 
     def _on_ptt_start(self) -> None:
         logger.info("PTT hotkey pressed")
+
+        with self._state_lock:
+            if self._state != AppState.IDLE:
+                logger.info(f"PTT ignored, current state: {self._state}")
+                return
+            self._state = AppState.RECORDING_PTT
+
         self._ensure_engine_initialized()
 
         if self._ptt_recorder is None:
@@ -143,25 +152,28 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         if self._ptt_keyboard is None:
             self._ptt_keyboard = FocusAwareKeyboardSender()
 
-        # Capture the current focused app before starting recording
         self._ptt_keyboard.start_capture()
-
         self.icon = self._icon_listening
         self._ptt_recorder.start()
 
     def _on_ptt_stop(self) -> None:
         logger.info("PTT hotkey released")
-        if self._ptt_recorder is None:
-            return
 
-        if not self._ptt_recorder.is_recording():
+        with self._state_lock:
+            if self._state != AppState.RECORDING_PTT:
+                return
+
+        if self._ptt_recorder is None or not self._ptt_recorder.is_recording():
+            self._set_state(AppState.IDLE)
             return
 
         audio_data = self._ptt_recorder.stop()
         if len(audio_data) < 1000:
+            self._set_state(AppState.IDLE)
             self.icon = self._icon_idle
             return
 
+        self._set_state(AppState.PROCESSING)
         self.icon = self._icon_processing
         threading.Thread(target=self._process_ptt_audio, args=(audio_data,), daemon=True).start()
 
@@ -169,27 +181,31 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         self._ensure_engine_initialized()
 
         if self._engine is None:
+            self._set_state(AppState.IDLE)
             self.icon = self._icon_idle
             self._end_ptt_capture()
             return
 
         try:
-            # Use the focus-aware keyboard for PTT mode
             if self._ptt_keyboard is not None:
                 self._engine.set_keyboard_sender(self._ptt_keyboard)
             self._engine.recognize_and_execute(audio_data)
         except Exception as e:
             logger.exception(f"PTT error: {e}")
         finally:
+            self._set_state(AppState.IDLE)
             self.icon = self._icon_idle
             self._end_ptt_capture()
-            # Reset to normal keyboard after PTT
             self._engine.set_keyboard_sender(MacOSKeyboardSender())
 
     def _end_ptt_capture(self) -> None:
-        """End the PTT focus capture session."""
         if self._ptt_keyboard is not None:
             self._ptt_keyboard.end_capture()
+
+    def _set_state(self, state: AppState) -> None:
+        with self._state_lock:
+            self._state = state
+        logger.debug(f"State changed to: {state}")
 
     def _ensure_engine_initialized(self) -> None:
         if self._engine is None:
@@ -217,11 +233,17 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         )
 
     def _toggle_listening(self, _sender: rumps.MenuItem) -> None:
+        with self._state_lock:
+            if self._state == AppState.RECORDING_PTT:
+                logger.info("Toggle ignored, PTT is active")
+                return
+            is_toggle_active = self._state == AppState.RECORDING_TOGGLE
+
         if self._engine is None:
             self.icon = self._icon_processing
             self.show_notification("Sheptun", t("notification_loading"))
             threading.Thread(target=self._init_and_start, daemon=True).start()
-        elif self._is_listening:
+        elif is_toggle_active:
             self._engine.stop()
             self._update_toggle_menu_title()
         else:
@@ -236,14 +258,19 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
 
     def _update_toggle_menu_title(self) -> None:
         toggle_display = self._hotkey_manager.toggle_hotkey_display
-        if self._is_listening:
+        is_toggle_active = self._state == AppState.RECORDING_TOGGLE
+        if is_toggle_active:
             self._toggle_menu_item.title = f"{t('menu_toggle_stop')} ({toggle_display})"
         else:
             self._toggle_menu_item.title = f"{t('menu_toggle')} ({toggle_display})"
 
     def set_listening(self, listening: bool) -> None:
-        self._is_listening = listening
-        self.icon = self._icon_listening if listening else self._icon_idle
+        if listening:
+            self._set_state(AppState.RECORDING_TOGGLE)
+            self.icon = self._icon_listening
+        else:
+            self._set_state(AppState.IDLE)
+            self.icon = self._icon_idle
 
     def set_processing(self) -> None:
         self.icon = self._icon_processing

@@ -3,6 +3,13 @@ from enum import Enum, auto
 from typing import Protocol
 
 
+class AppState(Enum):
+    IDLE = auto()
+    RECORDING_TOGGLE = auto()
+    RECORDING_PTT = auto()
+    PROCESSING = auto()
+
+
 class ActionType(Enum):
     TEXT = auto()
     KEY = auto()
