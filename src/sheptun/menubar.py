@@ -145,6 +145,9 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         if self._ptt_recorder is None:
             return
 
+        if not self._ptt_recorder.is_recording():
+            return
+
         audio_data = self._ptt_recorder.stop()
         if len(audio_data) < 1000:
             self.icon = self._icon_idle
