@@ -46,9 +46,10 @@ src/sheptun/
 ├── hotkeys.py      # HotkeyManager (pynput) for global hotkeys
 ├── status.py       # Console status indicators (Rich)
 ├── settings.py     # Settings from .env
+├── dataset.py      # DatasetRecorder for fine-tuning data collection
 ├── i18n.py         # Russian translations
 ├── app_builder.py  # macOS .app bundle builder
-└── types.py        # Protocols, dataclasses, enums
+└── types.py        # Protocols, dataclasses, enums (AppState)
 ```
 
 **Data flow:** Microphone → VAD → Whisper → CommandParser → KeyboardSender
