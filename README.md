@@ -6,6 +6,9 @@
 
 ```bash
 pip install -e .
+
+# Активировать виртуальное окружение
+source .venv/bin/activate
 ```
 
 ## Использование
