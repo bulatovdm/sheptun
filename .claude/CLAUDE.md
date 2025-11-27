@@ -11,8 +11,16 @@ Sheptun is a voice-controlled terminal application for Russian language. Uses lo
 ```bash
 # Development
 pip install -e ".[dev]"
-ruff check src tests && ruff format src tests && mypy src
 pytest
+
+# Linting & Type Checking (run all before commit)
+ruff check src tests        # Linting (style, imports, errors)
+ruff format src tests       # Auto-format code
+mypy src                    # Strict type checking for src
+pyright src tests           # Type checking like VS Code/Pylance
+
+# All checks in one command
+ruff check src tests && mypy src && pyright src tests
 
 # Application
 sheptun listen              # CLI mode

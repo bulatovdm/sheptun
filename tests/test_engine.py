@@ -1,4 +1,5 @@
-from unittest.mock import MagicMock, patch
+# pyright: reportPrivateUsage=false
+from unittest.mock import patch
 
 import pytest
 
@@ -51,7 +52,9 @@ class MockRecognizer:
     def __init__(self, result: RecognitionResult | None = None) -> None:
         self._result = result
 
-    def recognize(self, audio_data: bytes, sample_rate: int) -> RecognitionResult | None:
+    def recognize(
+        self, _audio_data: bytes, _sample_rate: int
+    ) -> RecognitionResult | None:
         return self._result
 
 

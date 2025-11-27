@@ -203,3 +203,42 @@ class MacOSKeyboardSender:
 
         CGEventPost(kCGHIDEventTap, key_down)
         CGEventPost(kCGHIDEventTap, key_up)
+
+
+class FocusAwareKeyboardSender:
+    """Keyboard sender wrapper that tracks focus and waits for it to return."""
+
+    def __init__(
+        self,
+        keyboard_sender: MacOSKeyboardSender | None = None,
+        focus_timeout: float = 10.0,
+    ) -> None:
+        from sheptun.focus import FocusAwareTextBuffer, FocusTracker
+
+        self._keyboard = keyboard_sender or MacOSKeyboardSender()
+        self._focus_tracker = FocusTracker()
+        self._text_buffer = FocusAwareTextBuffer(
+            send_text_callback=self._keyboard.send_text,
+            focus_tracker=self._focus_tracker,
+            focus_timeout=focus_timeout,
+        )
+
+    def start_capture(self) -> None:
+        """Start tracking the current focused app."""
+        self._text_buffer.start_capture()
+
+    def end_capture(self) -> None:
+        """Stop tracking focus."""
+        self._text_buffer.end_capture()
+
+    def send_text(self, text: str) -> None:
+        """Send text, waiting for focus if needed."""
+        self._text_buffer.send_text(text)
+
+    def send_key(self, key: str) -> None:
+        """Send a key press."""
+        self._keyboard.send_key(key)
+
+    def send_hotkey(self, keys: list[str]) -> None:
+        """Send a hotkey combination."""
+        self._keyboard.send_hotkey(keys)

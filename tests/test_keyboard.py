@@ -33,7 +33,7 @@ class TestKeyCodes:
             assert key in KEY_CODES, f"Missing key: {key}"
 
     def test_keycode_structure(self) -> None:
-        for key, keycode in KEY_CODES.items():
+        for keycode in KEY_CODES.values():
             assert isinstance(keycode, KeyCode)
             assert isinstance(keycode.code, int)
             assert isinstance(keycode.needs_shift, bool)

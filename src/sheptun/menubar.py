@@ -11,7 +11,7 @@ from sheptun.config import get_config_path
 from sheptun.engine import BaseVoiceEngine
 from sheptun.hotkeys import HotkeyManager
 from sheptun.i18n import t
-from sheptun.keyboard import MacOSKeyboardSender
+from sheptun.keyboard import FocusAwareKeyboardSender, MacOSKeyboardSender
 from sheptun.recognition import WhisperRecognizer
 from sheptun.settings import settings, setup_logging
 
@@ -94,6 +94,7 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         self._engine: MenubarVoiceEngine | None = None
         self._is_listening = False
         self._ptt_recorder: AudioRecorder | None = None
+        self._ptt_keyboard: FocusAwareKeyboardSender | None = None
 
         self._icon_idle = _get_icon_path("mic_idle.png")
         self._icon_listening = _get_icon_path("mic_active.png")
@@ -137,6 +138,12 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         if self._ptt_recorder is None:
             self._ptt_recorder = AudioRecorder()
 
+        if self._ptt_keyboard is None:
+            self._ptt_keyboard = FocusAwareKeyboardSender()
+
+        # Capture the current focused app before starting recording
+        self._ptt_keyboard.start_capture()
+
         self.icon = self._icon_listening
         self._ptt_recorder.start()
 
@@ -161,14 +168,26 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
 
         if self._engine is None:
             self.icon = self._icon_idle
+            self._end_ptt_capture()
             return
 
         try:
+            # Use the focus-aware keyboard for PTT mode
+            if self._ptt_keyboard is not None:
+                self._engine.set_keyboard_sender(self._ptt_keyboard)
             self._engine.recognize_and_execute(audio_data)
         except Exception as e:
             logger.exception(f"PTT error: {e}")
         finally:
             self.icon = self._icon_idle
+            self._end_ptt_capture()
+            # Reset to normal keyboard after PTT
+            self._engine.set_keyboard_sender(MacOSKeyboardSender())
+
+    def _end_ptt_capture(self) -> None:
+        """End the PTT focus capture session."""
+        if self._ptt_keyboard is not None:
+            self._ptt_keyboard.end_capture()
 
     def _ensure_engine_initialized(self) -> None:
         if self._engine is None:

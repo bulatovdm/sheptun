@@ -53,6 +53,10 @@ class BaseVoiceEngine:
         with self._lock:
             return self._running
 
+    def set_keyboard_sender(self, keyboard_sender: KeyboardSender) -> None:
+        """Set the keyboard sender to use for text input."""
+        self._keyboard = keyboard_sender
+
     def recognize_and_execute(self, audio_data: bytes) -> None:
         try:
             result = self._recognizer.recognize(audio_data, self._recorder.sample_rate)
