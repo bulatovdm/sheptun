@@ -14,6 +14,8 @@ CGEventKeyboardSetUnicodeString: Any = getattr(  # noqa: B009
 )
 CGEventPost: Any = getattr(Quartz, "CGEventPost")  # noqa: B009
 CGEventSetFlags: Any = getattr(Quartz, "CGEventSetFlags")  # noqa: B009
+CGEventSetType: Any = getattr(Quartz, "CGEventSetType")  # noqa: B009
+kCGEventKeyUp: Any = getattr(Quartz, "kCGEventKeyUp")  # noqa: B009
 kCGEventFlagMaskAlternate: int = getattr(Quartz, "kCGEventFlagMaskAlternate")  # noqa: B009
 kCGEventFlagMaskCommand: int = getattr(Quartz, "kCGEventFlagMaskCommand")  # noqa: B009
 kCGEventFlagMaskControl: int = getattr(Quartz, "kCGEventFlagMaskControl")  # noqa: B009
@@ -140,8 +142,9 @@ MODIFIER_FLAGS: dict[str, int] = {
 
 
 class MacOSKeyboardSender:
-    def __init__(self, key_delay: float = 0.005, use_clipboard: bool = True) -> None:
-        self._key_delay = key_delay
+    def __init__(self, key_delay: float | None = None, use_clipboard: bool = False) -> None:
+        from sheptun.settings import settings
+        self._key_delay = key_delay if key_delay is not None else settings.key_delay
         self._use_clipboard = use_clipboard
         self._pasteboard = NSPasteboard.generalPasteboard()
 
@@ -176,21 +179,22 @@ class MacOSKeyboardSender:
         self._send_key_event(KEY_CODES["v"].code, kCGEventFlagMaskCommand)
 
     def _send_via_events(self, text: str) -> None:
+        import logging
+        logger = logging.getLogger("sheptun.keyboard")
+        logger.debug(f"Sending text via events: '{text}' (len={len(text)})")
         for i in range(0, len(text), MAX_UNICODE_STRING_LENGTH):
             chunk = text[i : i + MAX_UNICODE_STRING_LENGTH]
+            logger.debug(f"Sending chunk {i//MAX_UNICODE_STRING_LENGTH}: '{chunk}'")
             self._send_unicode_string(chunk)
             if i + MAX_UNICODE_STRING_LENGTH < len(text):
                 time.sleep(self._key_delay)
 
     def _send_unicode_string(self, text: str) -> None:
-        key_down = CGEventCreateKeyboardEvent(None, 0, True)
-        key_up = CGEventCreateKeyboardEvent(None, 0, False)
-
-        CGEventKeyboardSetUnicodeString(key_down, len(text), text)
-        CGEventKeyboardSetUnicodeString(key_up, len(text), text)
-
-        CGEventPost(kCGHIDEventTap, key_down)
-        CGEventPost(kCGHIDEventTap, key_up)
+        key_event = CGEventCreateKeyboardEvent(None, 0, True)
+        CGEventKeyboardSetUnicodeString(key_event, len(text), text)
+        CGEventPost(kCGHIDEventTap, key_event)
+        CGEventSetType(key_event, kCGEventKeyUp)
+        CGEventPost(kCGHIDEventTap, key_event)
 
     def send_key(self, key: str) -> None:
         key_lower = key.lower()

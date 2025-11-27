@@ -196,7 +196,7 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
             self._set_state(AppState.IDLE)
             self.icon = self._icon_idle
             self._end_ptt_capture()
-            self._engine.set_keyboard_sender(MacOSKeyboardSender())
+            self._engine.set_keyboard_sender(MacOSKeyboardSender(use_clipboard=settings.use_clipboard))
 
     def _end_ptt_capture(self) -> None:
         if self._ptt_keyboard is not None:
@@ -221,7 +221,7 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         config = CommandConfigLoader.load(config_path)
         recognizer = WhisperRecognizer(model_name=self._model_name)
         command_parser = CommandParser(config)
-        keyboard_sender = MacOSKeyboardSender()
+        keyboard_sender = MacOSKeyboardSender(use_clipboard=settings.use_clipboard)
         status_indicator = MenubarStatusIndicator(self)
 
         self._engine = MenubarVoiceEngine(
