@@ -1,4 +1,3 @@
-import subprocess
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -6,6 +5,9 @@ from typing import Any
 import Quartz
 
 CGEventCreateKeyboardEvent: Any = getattr(Quartz, "CGEventCreateKeyboardEvent")  # noqa: B009
+CGEventKeyboardSetUnicodeString: Any = getattr(  # noqa: B009
+    Quartz, "CGEventKeyboardSetUnicodeString"
+)
 CGEventPost: Any = getattr(Quartz, "CGEventPost")  # noqa: B009
 CGEventSetFlags: Any = getattr(Quartz, "CGEventSetFlags")  # noqa: B009
 kCGEventFlagMaskAlternate: int = getattr(Quartz, "kCGEventFlagMaskAlternate")  # noqa: B009
@@ -13,6 +15,8 @@ kCGEventFlagMaskCommand: int = getattr(Quartz, "kCGEventFlagMaskCommand")  # noq
 kCGEventFlagMaskControl: int = getattr(Quartz, "kCGEventFlagMaskControl")  # noqa: B009
 kCGEventFlagMaskShift: int = getattr(Quartz, "kCGEventFlagMaskShift")  # noqa: B009
 kCGHIDEventTap: Any = getattr(Quartz, "kCGHIDEventTap")  # noqa: B009
+
+MAX_UNICODE_STRING_LENGTH = 20
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,33 +136,25 @@ MODIFIER_FLAGS: dict[str, int] = {
 
 
 class MacOSKeyboardSender:
-    def __init__(self, key_delay: float = 0.01) -> None:
+    def __init__(self, key_delay: float = 0.005) -> None:
         self._key_delay = key_delay
 
     def send_text(self, text: str) -> None:
-        old_clipboard = self._get_clipboard()
-        self._set_clipboard(text)
-        self.send_hotkey(["command", "v"])
-        time.sleep(0.05)
-        if old_clipboard:
-            self._set_clipboard(old_clipboard)
+        for i in range(0, len(text), MAX_UNICODE_STRING_LENGTH):
+            chunk = text[i : i + MAX_UNICODE_STRING_LENGTH]
+            self._send_unicode_string(chunk)
+            if i + MAX_UNICODE_STRING_LENGTH < len(text):
+                time.sleep(self._key_delay)
 
-    def _get_clipboard(self) -> str:
-        result = subprocess.run(
-            ["pbpaste"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        return result.stdout
+    def _send_unicode_string(self, text: str) -> None:
+        key_down = CGEventCreateKeyboardEvent(None, 0, True)
+        key_up = CGEventCreateKeyboardEvent(None, 0, False)
 
-    def _set_clipboard(self, text: str) -> None:
-        subprocess.run(
-            ["pbcopy"],
-            input=text,
-            text=True,
-            check=False,
-        )
+        CGEventKeyboardSetUnicodeString(key_down, len(text), text)
+        CGEventKeyboardSetUnicodeString(key_up, len(text), text)
+
+        CGEventPost(kCGHIDEventTap, key_down)
+        CGEventPost(kCGHIDEventTap, key_up)
 
     def send_key(self, key: str) -> None:
         key_lower = key.lower()
