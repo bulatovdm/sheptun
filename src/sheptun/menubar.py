@@ -1,6 +1,9 @@
 import importlib.resources
+import json
 import logging
 import threading
+from enum import Enum
+from pathlib import Path
 from typing import Any
 
 import rumps
@@ -16,6 +19,29 @@ from sheptun.types import Action, ActionType
 
 setup_logging()
 logger = logging.getLogger("sheptun.menubar")
+
+PREFS_FILE = Path.home() / ".config" / "sheptun" / "menubar_prefs.json"
+
+
+class HotkeyMode(Enum):
+    TOGGLE = "toggle"
+    PUSH_TO_TALK = "push_to_talk"
+
+
+def _load_prefs() -> dict[str, Any]:
+    """Load preferences from file."""
+    if PREFS_FILE.exists():
+        try:
+            return json.loads(PREFS_FILE.read_text())  # type: ignore[no-any-return]
+        except Exception:
+            pass
+    return {}
+
+
+def _save_prefs(prefs: dict[str, Any]) -> None:
+    """Save preferences to file."""
+    PREFS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PREFS_FILE.write_text(json.dumps(prefs))
 
 
 def _parse_hotkey(hotkey_str: str) -> set[Any] | None:
@@ -130,6 +156,18 @@ class MenubarVoiceEngine:
         with self._lock:
             return self._running
 
+    def recognize_and_execute(self, audio_data: bytes) -> None:
+        """Recognize audio and execute action (for push-to-talk)."""
+        try:
+            result = self._recognizer.recognize(audio_data, self._recorder.sample_rate)
+            if result and result.text:
+                logger.info(f"Recognized: '{result.text}'")
+                action = self._command_parser.parse(result.text)
+                if action:
+                    self._execute_action(action)
+        except Exception as e:
+            logger.exception(f"Recognition error: {e}")
+
     def _on_speech_detected(self, audio_data: bytes) -> None:
         if not self._running:
             return
@@ -194,6 +232,11 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         self._hotkey_listener: keyboard.Listener | None = None
         self._hotkey_keys: set[Any] = _parse_hotkey(settings.hotkey) or set()
         self._pressed_keys: set[Any] = set()
+        self._hotkey_active = False
+
+        prefs = _load_prefs()
+        mode_str = prefs.get("hotkey_mode", HotkeyMode.TOGGLE.value)
+        self._hotkey_mode = HotkeyMode(mode_str) if mode_str in [m.value for m in HotkeyMode] else HotkeyMode.TOGGLE
 
         self._icon_idle = _get_icon_path("mic_idle.png")
         self._icon_listening = _get_icon_path("mic_active.png")
@@ -202,13 +245,36 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         self.icon = self._icon_idle
         hotkey_display = settings.hotkey.replace("<cmd>", "⌘").replace("<shift>", "⇧").replace("<ctrl>", "⌃").replace("<alt>", "⌥").upper()
         self._start_menu_item = rumps.MenuItem(f"Начать слушать ({hotkey_display})", callback=self._toggle_listening)
+
+        self._mode_toggle = rumps.MenuItem("Toggle (вкл/выкл)", callback=self._set_mode_toggle)
+        self._mode_ptt = rumps.MenuItem("Push-to-talk (удерживать)", callback=self._set_mode_ptt)
+        self._update_mode_menu()
+
         self.menu = [
             self._start_menu_item,
+            None,
+            ["Режим хоткея", [self._mode_toggle, self._mode_ptt]],
             None,
             rumps.MenuItem("Перезапустить", callback=self._restart),
             rumps.MenuItem("Выход", callback=self._quit),
         ]
         self._start_hotkey_listener()
+
+    def _update_mode_menu(self) -> None:
+        self._mode_toggle.state = self._hotkey_mode == HotkeyMode.TOGGLE
+        self._mode_ptt.state = self._hotkey_mode == HotkeyMode.PUSH_TO_TALK
+
+    def _set_mode_toggle(self, _: Any) -> None:
+        self._hotkey_mode = HotkeyMode.TOGGLE
+        self._update_mode_menu()
+        _save_prefs({"hotkey_mode": self._hotkey_mode.value})
+        logger.info("Switched to toggle mode")
+
+    def _set_mode_ptt(self, _: Any) -> None:
+        self._hotkey_mode = HotkeyMode.PUSH_TO_TALK
+        self._update_mode_menu()
+        _save_prefs({"hotkey_mode": self._hotkey_mode.value})
+        logger.info("Switched to push-to-talk mode")
 
     def _start_hotkey_listener(self) -> None:
         if not self._hotkey_keys:
@@ -217,16 +283,70 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
 
         def on_press(key: Any) -> None:
             self._pressed_keys.add(key)
-            if self._hotkey_keys.issubset(self._pressed_keys):
-                logger.info("Hotkey pressed, toggling listening")
-                self._toggle_listening(self._start_menu_item)
+            if self._hotkey_keys.issubset(self._pressed_keys) and not self._hotkey_active:
+                self._hotkey_active = True
+                if self._hotkey_mode == HotkeyMode.TOGGLE:
+                    logger.info("Hotkey pressed, toggling listening")
+                    self._toggle_listening(self._start_menu_item)
+                else:
+                    logger.info("Hotkey pressed, starting push-to-talk")
+                    self._start_ptt()
 
         def on_release(key: Any) -> None:
             self._pressed_keys.discard(key)
+            if self._hotkey_active and not self._hotkey_keys.issubset(self._pressed_keys):
+                self._hotkey_active = False
+                if self._hotkey_mode == HotkeyMode.PUSH_TO_TALK:
+                    logger.info("Hotkey released, stopping push-to-talk")
+                    self._stop_ptt()
 
         self._hotkey_listener = keyboard.Listener(on_press=on_press, on_release=on_release)
         self._hotkey_listener.start()
         logger.info(f"Hotkey listener started for {settings.hotkey}")
+
+    def _start_ptt(self) -> None:
+        """Start push-to-talk recording."""
+        from sheptun.audio import AudioRecorder
+
+        if self._engine is None:
+            self.icon = self._icon_processing
+            self.show_notification("Sheptun", "Загрузка модели...")
+            self._init_engine()
+
+        if not hasattr(self, "_ptt_recorder"):
+            self._ptt_recorder = AudioRecorder()
+
+        self.icon = self._icon_listening
+        self._ptt_recorder.start()
+
+    def _stop_ptt(self) -> None:
+        """Stop push-to-talk and process audio."""
+        if not hasattr(self, "_ptt_recorder"):
+            return
+
+        audio_data = self._ptt_recorder.stop()
+        if len(audio_data) < 1000:
+            self.icon = self._icon_idle
+            return
+
+        self.icon = self._icon_processing
+        threading.Thread(target=self._process_ptt_audio, args=(audio_data,), daemon=True).start()
+
+    def _process_ptt_audio(self, audio_data: bytes) -> None:
+        """Process push-to-talk audio in background."""
+        if self._engine is None:
+            self._init_engine()
+
+        if self._engine is None:
+            self.icon = self._icon_idle
+            return
+
+        try:
+            self._engine.recognize_and_execute(audio_data)
+        except Exception as e:
+            logger.exception(f"PTT error: {e}")
+        finally:
+            self.icon = self._icon_idle
 
     def _init_engine(self) -> None:
         if self._engine is not None:
