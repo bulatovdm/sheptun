@@ -57,6 +57,12 @@ class MockRecognizer:
     ) -> RecognitionResult | None:
         return self._result
 
+    def start_warmup(self) -> None:
+        pass
+
+    def stop_warmup(self) -> None:
+        pass
+
 
 class MockKeyboardSender:
     def __init__(self) -> None:

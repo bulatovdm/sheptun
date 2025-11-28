@@ -134,36 +134,58 @@ class WhisperRecognizer:
         if sample_rate != 16000:
             audio_float32 = self._resample(audio_float32, sample_rate, 16000)
 
-        audio_float32 = self._trim_leading_silence(audio_float32, sample_rate)
+        audio_float32 = self._trim_silence(audio_float32, sample_rate)
 
         return audio_float32
 
-    def _trim_leading_silence(
+    def _trim_silence(
         self,
         audio: np.ndarray[Any, Any],
         sample_rate: int,
         threshold: float = 0.01,
         window_ms: int = 20,
     ) -> np.ndarray[Any, Any]:
-        """Trim silence from the beginning of audio to speed up recognition."""
         window_size = int(sample_rate * window_ms / 1000)
         if len(audio) < window_size:
             return audio
 
+        start = self._find_speech_start(audio, window_size, threshold, sample_rate)
+        end = self._find_speech_end(audio, window_size, threshold, sample_rate)
+
+        trimmed = audio[start:end]
+        trimmed_duration = (len(audio) - len(trimmed)) / sample_rate
+        if trimmed_duration > 0.1:
+            logger.debug(f"Trimmed {trimmed_duration:.2f}s silence")
+
+        return trimmed
+
+    def _find_speech_start(
+        self,
+        audio: np.ndarray[Any, Any],
+        window_size: int,
+        threshold: float,
+        sample_rate: int,
+    ) -> int:
         for i in range(0, len(audio) - window_size, window_size):
             window = audio[i : i + window_size]
             energy = np.sqrt(np.mean(window**2))
             if energy > threshold:
-                # Keep 50ms before speech start for context
-                start = max(0, i - int(sample_rate * 0.05))
-                trimmed = audio[start:]
-                if len(trimmed) < len(audio):
-                    logger.debug(
-                        f"Trimmed {(len(audio) - len(trimmed)) / sample_rate:.2f}s silence"
-                    )
-                return trimmed
+                return max(0, i - int(sample_rate * 0.05))
+        return 0
 
-        return audio
+    def _find_speech_end(
+        self,
+        audio: np.ndarray[Any, Any],
+        window_size: int,
+        threshold: float,
+        sample_rate: int,
+    ) -> int:
+        for i in range(len(audio) - window_size, 0, -window_size):
+            window = audio[i : i + window_size]
+            energy = np.sqrt(np.mean(window**2))
+            if energy > threshold:
+                return min(len(audio), i + window_size + int(sample_rate * 0.05))
+        return len(audio)
 
     def _resample(
         self, audio: np.ndarray[Any, Any], orig_sr: int, target_sr: int
