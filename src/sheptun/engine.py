@@ -57,6 +57,7 @@ class BaseVoiceEngine:
             self._state = AppState.RECORDING_TOGGLE
 
         self._on_start()
+        self._recognizer.start_warmup()
         self._recorder.set_callback(self._on_speech_detected)
         self._recorder.start()
 
@@ -66,6 +67,7 @@ class BaseVoiceEngine:
                 return
             self._state = AppState.IDLE
 
+        self._recognizer.stop_warmup()
         self._recorder.stop()
         self._on_stop()
 

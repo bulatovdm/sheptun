@@ -1,3 +1,5 @@
+import logging
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -7,6 +9,11 @@ import whisper
 from sheptun.settings import settings
 from sheptun.types import RecognitionResult
 
+logger = logging.getLogger("sheptun")
+
+# Short silence for warmup (0.1 sec at 16kHz)
+_WARMUP_AUDIO = np.zeros(1600, dtype=np.float32)
+
 
 class WhisperRecognizer:
     def __init__(
@@ -14,16 +21,59 @@ class WhisperRecognizer:
         model_name: str = "base",
         device: str | None = None,
         hallucinations: tuple[str, ...] | None = None,
+        warmup_interval: float | None = None,
     ) -> None:
         self._model: Any = whisper.load_model(model_name, device=device)
         self._model_name = model_name
         self._hallucinations = {
             h.lower() for h in (hallucinations or settings.hallucinations)
         }
+        self._warmup_interval = (
+            warmup_interval if warmup_interval is not None else settings.warmup_interval
+        )
+        self._warmup_timer: threading.Timer | None = None
+        self._warmup_lock = threading.Lock()
 
     @property
     def model_name(self) -> str:
         return self._model_name
+
+    def warmup(self) -> None:
+        """Run a quick inference on silence to keep the model in GPU memory."""
+        try:
+            self._model.transcribe(_WARMUP_AUDIO, language="ru", fp16=False)
+            logger.debug("Warmup completed")
+        except Exception as e:
+            logger.debug(f"Warmup error: {e}")
+
+    def start_warmup(self) -> None:
+        """Start periodic warmup to keep model in memory."""
+        if self._warmup_interval <= 0:
+            return
+
+        self._schedule_warmup()
+        logger.debug(f"Warmup started with interval {self._warmup_interval}s")
+
+    def stop_warmup(self) -> None:
+        """Stop periodic warmup."""
+        with self._warmup_lock:
+            if self._warmup_timer is not None:
+                self._warmup_timer.cancel()
+                self._warmup_timer = None
+        logger.debug("Warmup stopped")
+
+    def _schedule_warmup(self) -> None:
+        with self._warmup_lock:
+            if self._warmup_timer is not None:
+                self._warmup_timer.cancel()
+
+            self._warmup_timer = threading.Timer(self._warmup_interval, self._warmup_tick)
+            self._warmup_timer.daemon = True
+            self._warmup_timer.start()
+
+    def _warmup_tick(self) -> None:
+        self.warmup()
+        self._schedule_warmup()
 
     def recognize(self, audio_data: bytes, sample_rate: int) -> RecognitionResult | None:
         audio_array = self._bytes_to_float_array(audio_data, sample_rate)
@@ -84,7 +134,36 @@ class WhisperRecognizer:
         if sample_rate != 16000:
             audio_float32 = self._resample(audio_float32, sample_rate, 16000)
 
+        audio_float32 = self._trim_leading_silence(audio_float32, sample_rate)
+
         return audio_float32
+
+    def _trim_leading_silence(
+        self,
+        audio: np.ndarray[Any, Any],
+        sample_rate: int,
+        threshold: float = 0.01,
+        window_ms: int = 20,
+    ) -> np.ndarray[Any, Any]:
+        """Trim silence from the beginning of audio to speed up recognition."""
+        window_size = int(sample_rate * window_ms / 1000)
+        if len(audio) < window_size:
+            return audio
+
+        for i in range(0, len(audio) - window_size, window_size):
+            window = audio[i : i + window_size]
+            energy = np.sqrt(np.mean(window**2))
+            if energy > threshold:
+                # Keep 50ms before speech start for context
+                start = max(0, i - int(sample_rate * 0.05))
+                trimmed = audio[start:]
+                if len(trimmed) < len(audio):
+                    logger.debug(
+                        f"Trimmed {(len(audio) - len(trimmed)) / sample_rate:.2f}s silence"
+                    )
+                return trimmed
+
+        return audio
 
     def _resample(
         self, audio: np.ndarray[Any, Any], orig_sr: int, target_sr: int

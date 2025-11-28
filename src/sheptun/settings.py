@@ -74,6 +74,7 @@ class Settings:
     hallucinations: tuple[str, ...] = _get_tuple("SHEPTUN_HALLUCINATIONS", _DEFAULT_HALLUCINATIONS)
     use_clipboard: bool = _get_bool("SHEPTUN_USE_CLIPBOARD", False)
     key_delay: float = _get_float("SHEPTUN_KEY_DELAY", 0.02)  # Low values may cause duplicates
+    warmup_interval: float = _get_float("SHEPTUN_WARMUP_INTERVAL", 120.0)  # seconds, 0 to disable
 
 
 settings = Settings()
