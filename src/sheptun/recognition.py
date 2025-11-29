@@ -1,4 +1,5 @@
 import logging
+import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,9 @@ from sheptun.settings import settings
 from sheptun.types import RecognitionResult
 
 logger = logging.getLogger("sheptun")
+
+# Pattern for sound descriptions in Cyrillic caps (e.g., laughter, music)
+_SOUND_DESCRIPTION_PATTERN = re.compile(r"^[А-ЯЁ\s]+$")
 
 # Short silence for warmup (0.1 sec at 16kHz)
 _WARMUP_AUDIO = np.zeros(1600, dtype=np.float32)
@@ -121,7 +125,10 @@ class WhisperRecognizer:
 
     def _is_hallucination(self, text: str) -> bool:
         text_lower = text.lower()
-        return any(h in text_lower for h in self._hallucinations)
+        if any(h in text_lower for h in self._hallucinations):
+            return True
+        # Filter sound descriptions in Cyrillic caps (e.g., laughter, music)
+        return bool(_SOUND_DESCRIPTION_PATTERN.match(text.strip()))
 
     def _bytes_to_float_array(
         self, audio_data: bytes, sample_rate: int
