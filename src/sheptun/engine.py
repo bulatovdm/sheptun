@@ -118,12 +118,14 @@ class BaseVoiceEngine:
         self._log(f"Speech detected: {len(audio_data)} bytes")
         self._set_state(AppState.PROCESSING)
         self._status.processing()
+        self._keyboard.start_capture()
 
         try:
             result = self._recognizer.recognize(audio_data, self._recorder.sample_rate)
 
             if result is None or not result.text:
                 self._log("Recognition returned empty result")
+                self._keyboard.end_capture()
                 self._resume_listening()
                 return
 
@@ -140,6 +142,7 @@ class BaseVoiceEngine:
             self._log(f"Error processing speech: {e}")
             self._status.error(str(e))
 
+        self._keyboard.end_capture()
         self._resume_listening()
 
     def _resume_listening(self) -> None:

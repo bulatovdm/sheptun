@@ -70,7 +70,7 @@ class MenubarVoiceEngine(BaseVoiceEngine):
         self,
         recognizer: WhisperRecognizer,
         command_parser: CommandParser,
-        keyboard_sender: MacOSKeyboardSender,
+        keyboard_sender: FocusAwareKeyboardSender | MacOSKeyboardSender,
         status_indicator: MenubarStatusIndicator,
         audio_config: AudioConfig | None = None,
         vad_config: VoiceActivityConfig | None = None,
@@ -221,7 +221,8 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         config = CommandConfigLoader.load(config_path)
         recognizer = WhisperRecognizer(model_name=self._model_name)
         command_parser = CommandParser(config)
-        keyboard_sender = MacOSKeyboardSender(use_clipboard=settings.use_clipboard)
+        base_keyboard = MacOSKeyboardSender(use_clipboard=settings.use_clipboard)
+        keyboard_sender = FocusAwareKeyboardSender(keyboard_sender=base_keyboard)
         status_indicator = MenubarStatusIndicator(self)
 
         self._engine = MenubarVoiceEngine(

@@ -148,6 +148,12 @@ class MacOSKeyboardSender:
         self._use_clipboard = use_clipboard
         self._pasteboard = NSPasteboard.generalPasteboard()
 
+    def start_capture(self) -> None:
+        pass
+
+    def end_capture(self) -> None:
+        pass
+
     def send_text(self, text: str) -> None:
         if self._use_clipboard:
             self._send_via_clipboard(text)
