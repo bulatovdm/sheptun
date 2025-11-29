@@ -97,19 +97,23 @@ class WhisperRecognizer:
             task="transcribe",
         )
 
-        text = result.get("text", "").strip()
-        if not text:
+        original_text = result.get("text", "").strip()
+        if not original_text:
             return None
 
-        if self._is_hallucination(text):
+        if self._is_hallucination(original_text):
             return None
 
-        text = self._apply_spell_correction(text)
+        corrected_text = self._apply_spell_correction(original_text)
 
         segments = result.get("segments", [])
         confidence = self._calculate_confidence(segments)
 
-        return RecognitionResult(text=text, confidence=confidence)
+        return RecognitionResult(
+            text=corrected_text,
+            confidence=confidence,
+            original_text=original_text if corrected_text != original_text else None,
+        )
 
     def recognize_from_file(self, audio_path: Path) -> RecognitionResult | None:
         result = self._model.transcribe(
@@ -119,19 +123,23 @@ class WhisperRecognizer:
             task="transcribe",
         )
 
-        text = result.get("text", "").strip()
-        if not text:
+        original_text = result.get("text", "").strip()
+        if not original_text:
             return None
 
-        if self._is_hallucination(text):
+        if self._is_hallucination(original_text):
             return None
 
-        text = self._apply_spell_correction(text)
+        corrected_text = self._apply_spell_correction(original_text)
 
         segments = result.get("segments", [])
         confidence = self._calculate_confidence(segments)
 
-        return RecognitionResult(text=text, confidence=confidence)
+        return RecognitionResult(
+            text=corrected_text,
+            confidence=confidence,
+            original_text=original_text if corrected_text != original_text else None,
+        )
 
     def _apply_spell_correction(self, text: str) -> str:
         from sheptun.spelling import correct_text

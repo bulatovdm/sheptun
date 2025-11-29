@@ -40,6 +40,7 @@ class BaseVoiceEngine:
         self._dataset_recorder = DatasetRecorder() if record_dataset else None
         self._state = AppState.IDLE
         self._lock = threading.Lock()
+        self._text_sent_in_session = False
 
     @property
     def state(self) -> AppState:
@@ -55,6 +56,7 @@ class BaseVoiceEngine:
             if self._state != AppState.IDLE:
                 return
             self._state = AppState.RECORDING_TOGGLE
+            self._text_sent_in_session = False
 
         self._on_start()
         self._recognizer.start_warmup()
@@ -101,7 +103,9 @@ class BaseVoiceEngine:
     def _log(self, message: str) -> None:
         logger.debug(message)
 
-    def _save_to_dataset(self, audio_data: bytes, text: str) -> None:
+    def _save_to_dataset(
+        self, audio_data: bytes, text: str, original_text: str | None = None
+    ) -> None:
         if self._dataset_recorder is None:
             return
 
@@ -109,8 +113,11 @@ class BaseVoiceEngine:
 
         audio_int16 = np.frombuffer(audio_data, dtype=np.int16)
         audio_float = audio_int16.astype(np.float32) / 32768.0
-        path = self._dataset_recorder.save(audio_float, text)
+        save_text = original_text if original_text else text
+        path = self._dataset_recorder.save(audio_float, save_text)
         self._log(f"Saved to dataset: {path}")
+        if original_text:
+            self._log(f"Original: '{original_text}' -> Corrected: '{text}'")
 
     def _on_speech_started(self) -> None:
         if self.state == AppState.IDLE:
@@ -137,7 +144,7 @@ class BaseVoiceEngine:
 
             self._log(f"Recognized: '{result.text}'")
             self._status.show_recognized(result.text)
-            self._save_to_dataset(audio_data, result.text)
+            self._save_to_dataset(audio_data, result.text, result.original_text)
             action = self._command_parser.parse(result.text)
             self._log(f"Parsed action: {action}")
 
@@ -167,6 +174,7 @@ class BaseVoiceEngine:
                     text = self._prepare_text(action.value)
                     self._status.show_action(f"Ввод текста: {text}")
                     self._keyboard.send_text(text)
+                    self._text_sent_in_session = True
 
             case ActionType.KEY:
                 if isinstance(action.value, str):
@@ -192,7 +200,7 @@ class BaseVoiceEngine:
         self.stop()
 
     def _prepare_text(self, text: str) -> str:
-        if settings.auto_space and text and text[0].isalpha():
+        if settings.auto_space and text and text[0].isalpha() and self._text_sent_in_session:
             return " " + text
         return text
 

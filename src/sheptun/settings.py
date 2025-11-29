@@ -102,8 +102,8 @@ class Settings:
     key_delay: float = _get_float("SHEPTUN_KEY_DELAY", 0.02)  # Low values may cause duplicates
     warmup_interval: float = _get_float("SHEPTUN_WARMUP_INTERVAL", 120.0)  # seconds, 0 to disable
     auto_space: bool = _get_bool("SHEPTUN_AUTO_SPACE", True)  # Add leading space to text
-    # Spell correction: none, sage-distilled (95M), sage-large (700M), t5-russian (200M)
-    spell_correction: str = _get_str("SHEPTUN_SPELL_CORRECTION", "sage-large")
+    # Spell correction: none, t5-russian (200M)
+    spell_correction: str = _get_str("SHEPTUN_SPELL_CORRECTION", "t5-russian")
 
 
 settings = Settings()

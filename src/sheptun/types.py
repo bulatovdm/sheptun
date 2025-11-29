@@ -29,6 +29,7 @@ class Action:
 class RecognitionResult:
     text: str
     confidence: float
+    original_text: str | None = None  # Before spell correction
 
 
 class SpeechRecognizer(Protocol):

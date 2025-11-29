@@ -8,9 +8,7 @@ logger = logging.getLogger("sheptun.spelling")
 
 class SpellCorrectorType(Enum):
     NONE = "none"
-    SAGE_DISTILLED = "sage-distilled"  # 95M, fast
-    SAGE_LARGE = "sage-large"  # ~700M, best quality
-    T5_RUSSIAN = "t5-russian"  # 200M, medium
+    T5_RUSSIAN = "t5-russian"  # 200M, UrukHan/t5-russian-spell
 
 
 class SpellCorrector(ABC):
@@ -21,36 +19,6 @@ class SpellCorrector(ABC):
 
 class NoOpCorrector(SpellCorrector):
     def correct(self, text: str) -> str:
-        return text
-
-
-class SageCorrector(SpellCorrector):
-    def __init__(self, model_name: str) -> None:
-        from sage.spelling_correction import AvailableCorrectors, T5ModelForSpellingCorruption
-
-        if model_name == "sage-distilled":
-            model_path = AvailableCorrectors.sage_fredt5_distilled_95m.value
-        else:
-            model_path = AvailableCorrectors.sage_fredt5_large.value
-
-        logger.info(f"Loading SAGE model: {model_path}")
-        self._model: Any = T5ModelForSpellingCorruption.from_pretrained(model_path)
-        logger.info("SAGE model loaded")
-
-    def correct(self, text: str) -> str:
-        if not text.strip():
-            return text
-
-        try:
-            results = self._model.correct(text)
-            if results and len(results) > 0:
-                corrected = results[0]
-                if corrected != text:
-                    logger.debug(f"Spell corrected: '{text}' -> '{corrected}'")
-                return str(corrected)
-        except Exception as e:
-            logger.warning(f"Spell correction failed: {e}")
-
         return text
 
 
@@ -110,12 +78,6 @@ def create_corrector(corrector_type: SpellCorrectorType | None = None) -> SpellC
 
     if corrector_type == SpellCorrectorType.NONE:
         return NoOpCorrector()
-
-    if corrector_type == SpellCorrectorType.SAGE_DISTILLED:
-        return SageCorrector("sage-distilled")
-
-    if corrector_type == SpellCorrectorType.SAGE_LARGE:
-        return SageCorrector("sage-large")
 
     if corrector_type == SpellCorrectorType.T5_RUSSIAN:
         return T5RussianCorrector()
