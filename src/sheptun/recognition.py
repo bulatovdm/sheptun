@@ -120,7 +120,8 @@ class WhisperRecognizer:
         return RecognitionResult(text=text, confidence=confidence)
 
     def _is_hallucination(self, text: str) -> bool:
-        return text.lower() in self._hallucinations
+        text_lower = text.lower()
+        return any(h in text_lower for h in self._hallucinations)
 
     def _bytes_to_float_array(
         self, audio_data: bytes, sample_rate: int
