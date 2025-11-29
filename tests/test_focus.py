@@ -1,32 +1,59 @@
 # pyright: reportPrivateUsage=false
 from unittest.mock import MagicMock, patch
 
-from sheptun.focus import BufferedText, FocusAwareTextBuffer, FocusTracker
+from sheptun.focus import (
+    FocusAwareTextBuffer,
+    FocusState,
+    FocusTracker,
+)
 
 
-class TestBufferedText:
-    def test_buffered_text_creation(self) -> None:
-        text = BufferedText(text="hello")
-        assert text.text == "hello"
-        assert text.timestamp > 0
+class TestFocusState:
+    def test_default_values(self) -> None:
+        state = FocusState()
+        assert state.app_bundle_id is None
+        assert state.window_title is None
+
+    def test_with_values(self) -> None:
+        state = FocusState(app_bundle_id="com.example.app", window_title="My Window")
+        assert state.app_bundle_id == "com.example.app"
+        assert state.window_title == "My Window"
 
 
 class TestFocusTracker:
     def test_capture_current_app(self) -> None:
         tracker = FocusTracker()
-        with patch.object(tracker, "get_frontmost_app", return_value="com.example.app"):
+        state = FocusState(app_bundle_id="com.example.app", window_title="Test")
+        with patch.object(tracker, "get_current_state", return_value=state):
             result = tracker.capture_current_app()
             assert result == "com.example.app"
+            assert tracker._current_state.window_title == "Test"
+
+    def test_is_same_focus_returns_true_when_same(self) -> None:
+        tracker = FocusTracker()
+        state = FocusState(app_bundle_id="com.example.app", window_title="Test")
+        with patch.object(tracker, "get_current_state", return_value=state):
+            tracker.capture_current_app()
+            assert tracker.is_same_focus()
+
+    def test_is_same_focus_returns_false_when_window_changed(self) -> None:
+        tracker = FocusTracker()
+        tracker._current_state = FocusState(
+            app_bundle_id="com.example.app", window_title="Window 1"
+        )
+        new_state = FocusState(app_bundle_id="com.example.app", window_title="Window 2")
+        with patch.object(tracker, "get_current_state", return_value=new_state):
+            assert not tracker.is_same_focus()
 
     def test_is_same_app_focused_returns_true_when_same(self) -> None:
         tracker = FocusTracker()
+        tracker._current_state = FocusState(app_bundle_id="com.example.app")
         with patch.object(tracker, "get_frontmost_app", return_value="com.example.app"):
-            tracker.capture_current_app()
             assert tracker.is_same_app_focused()
 
     def test_is_same_app_focused_returns_false_when_different(self) -> None:
         tracker = FocusTracker()
-        tracker._current_app = "com.example.app"
+        tracker._current_state = FocusState(app_bundle_id="com.example.app")
         with patch.object(tracker, "get_frontmost_app", return_value="com.other.app"):
             assert not tracker.is_same_app_focused()
 
@@ -53,11 +80,11 @@ class TestFocusAwareTextBuffer:
         buffer.send_text("hello")
         callback.assert_called_once_with("hello")
 
-    def test_send_text_directly_when_same_app_focused(self) -> None:
+    def test_send_text_directly_when_same_focus(self) -> None:
         callback = MagicMock()
         tracker = MagicMock()
         tracker.capture_current_app.return_value = "com.example.app"
-        tracker.get_frontmost_app.return_value = "com.example.app"
+        tracker.is_same_focus.return_value = True
 
         buffer = FocusAwareTextBuffer(
             send_text_callback=callback, focus_tracker=tracker
@@ -70,8 +97,8 @@ class TestFocusAwareTextBuffer:
         callback = MagicMock()
         tracker = MagicMock()
         tracker.capture_current_app.return_value = "com.example.app"
-        tracker.get_frontmost_app.return_value = "com.other.app"
-        tracker.wait_for_app_focus.return_value = True
+        tracker.is_same_focus.return_value = False
+        tracker.wait_for_focus.return_value = True
 
         buffer = FocusAwareTextBuffer(
             send_text_callback=callback, focus_tracker=tracker, focus_timeout=1.0
@@ -79,15 +106,15 @@ class TestFocusAwareTextBuffer:
         buffer.start_capture()
         buffer.send_text("hello")
 
-        tracker.wait_for_app_focus.assert_called_once()
+        tracker.wait_for_focus.assert_called_once()
         callback.assert_called_once_with("hello")
 
     def test_no_send_on_timeout(self) -> None:
         callback = MagicMock()
         tracker = MagicMock()
         tracker.capture_current_app.return_value = "com.example.app"
-        tracker.get_frontmost_app.return_value = "com.other.app"
-        tracker.wait_for_app_focus.return_value = False
+        tracker.is_same_focus.return_value = False
+        tracker.wait_for_focus.return_value = False
 
         buffer = FocusAwareTextBuffer(
             send_text_callback=callback, focus_tracker=tracker, focus_timeout=0.1
@@ -101,7 +128,7 @@ class TestFocusAwareTextBuffer:
         callback = MagicMock()
         tracker = MagicMock()
         tracker.capture_current_app.return_value = "com.example.app"
-        tracker.get_frontmost_app.return_value = "com.other.app"
+        tracker.is_same_focus.return_value = False
 
         buffer = FocusAwareTextBuffer(
             send_text_callback=callback, focus_tracker=tracker
@@ -109,6 +136,5 @@ class TestFocusAwareTextBuffer:
         buffer.start_capture()
         buffer.end_capture()
 
-        # After ending capture, should send directly
         buffer.send_text("hello")
         callback.assert_called_once_with("hello")

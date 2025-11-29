@@ -229,8 +229,10 @@ class ContinuousAudioRecorder:
         self._stream: sd.InputStream | None = None
         self._running = False
         self._lock = threading.Lock()
+        self._on_speech_start: Callable[[], None] | None = None
         self._on_speech_complete: Callable[[bytes], None] | None = None
         self._last_speech_time: float = 0.0
+        self._speech_started_notified: bool = False
 
     @property
     def sample_rate(self) -> int:
@@ -239,6 +241,9 @@ class ContinuousAudioRecorder:
     def set_callback(self, callback: Callable[[bytes], None]) -> None:
         self._on_speech_complete = callback
 
+    def set_speech_start_callback(self, callback: Callable[[], None]) -> None:
+        self._on_speech_start = callback
+
     def start(self) -> None:
         if self._running:
             return
@@ -246,6 +251,7 @@ class ContinuousAudioRecorder:
         self._running = True
         self._vad.reset()
         self._last_speech_time = time.time()
+        self._speech_started_notified = False
 
         with self._lock:
             self._buffer.clear()
@@ -283,28 +289,36 @@ class ContinuousAudioRecorder:
         chunk = indata.tobytes()
         audio_data: bytes | None = None
         current_time = time.time()
+        notify_speech_start = False
 
         with self._lock:
             self._buffer.append(chunk)
+            was_speaking = self._vad._is_speaking
             speech_complete = self._vad.process_chunk(chunk, self._audio_config.sample_rate)
 
-            # Check if VAD detected any speech activity
             if self._vad._is_speaking:
                 self._last_speech_time = current_time
+                if not was_speaking and not self._speech_started_notified:
+                    notify_speech_start = True
+                    self._speech_started_notified = True
 
             if speech_complete:
                 audio_data = b"".join(self._buffer)
                 self._buffer.clear()
                 self._vad.reset()
                 self._last_speech_time = current_time
+                self._speech_started_notified = False
             elif self._should_reset_idle(current_time):
-                # Reset buffer if idle for too long without speech
                 buffer_duration = len(self._buffer) * self._audio_config.blocksize / self._audio_config.sample_rate
-                if buffer_duration > 0.5:  # Only log if there was something to reset
+                if buffer_duration > 0.5:
                     logger.debug(f"Idle timeout: resetting {buffer_duration:.1f}s of buffered audio")
                 self._buffer.clear()
                 self._vad.reset()
                 self._last_speech_time = current_time
+                self._speech_started_notified = False
+
+        if notify_speech_start and self._on_speech_start is not None:
+            self._on_speech_start()
 
         if audio_data is not None and self._on_speech_complete is not None:
             self._on_speech_complete(audio_data)

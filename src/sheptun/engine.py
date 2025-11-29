@@ -58,6 +58,7 @@ class BaseVoiceEngine:
 
         self._on_start()
         self._recognizer.start_warmup()
+        self._recorder.set_speech_start_callback(self._on_speech_started)
         self._recorder.set_callback(self._on_speech_detected)
         self._recorder.start()
 
@@ -111,6 +112,12 @@ class BaseVoiceEngine:
         path = self._dataset_recorder.save(audio_float, text)
         self._log(f"Saved to dataset: {path}")
 
+    def _on_speech_started(self) -> None:
+        if self.state == AppState.IDLE:
+            return
+        self._log("Speech started, capturing focus")
+        self._keyboard.start_capture()
+
     def _on_speech_detected(self, audio_data: bytes) -> None:
         if self.state == AppState.IDLE:
             return
@@ -118,7 +125,6 @@ class BaseVoiceEngine:
         self._log(f"Speech detected: {len(audio_data)} bytes")
         self._set_state(AppState.PROCESSING)
         self._status.processing()
-        self._keyboard.start_capture()
 
         try:
             result = self._recognizer.recognize(audio_data, self._recorder.sample_rate)

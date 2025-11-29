@@ -1,31 +1,24 @@
-"""Focus tracking and text buffering for macOS applications."""
-
 import logging
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 logger = logging.getLogger("sheptun.focus")
 
 
 @dataclass
-class BufferedText:
-    """Text waiting to be inserted when focus returns."""
-
-    text: str
-    timestamp: float = field(default_factory=time.time)
+class FocusState:
+    app_bundle_id: str | None = None
+    window_title: str | None = None
 
 
 class FocusTracker:
-    """Tracks the frontmost application on macOS using NSWorkspace."""
-
     def __init__(self) -> None:
-        self._current_app: str | None = None
+        self._current_state: FocusState = FocusState()
         self._lock = threading.Lock()
 
     def get_frontmost_app(self) -> str | None:
-        """Get the bundle identifier of the frontmost application."""
         try:
             import AppKit
 
@@ -42,20 +35,100 @@ class FocusTracker:
             logger.warning(f"Failed to get frontmost app: {e}")
             return None
 
+    def get_main_window_title(self, pid: int) -> str | None:
+        try:
+            import ApplicationServices  # type: ignore[import-untyped]
+
+            AXUIElementCreateApplication = getattr(  # noqa: B009
+                ApplicationServices, "AXUIElementCreateApplication"
+            )
+            AXUIElementCopyAttributeValue = getattr(  # noqa: B009
+                ApplicationServices, "AXUIElementCopyAttributeValue"
+            )
+            kAXTitleAttribute = getattr(  # noqa: B009
+                ApplicationServices, "kAXTitleAttribute"
+            )
+
+            app_ref = AXUIElementCreateApplication(pid)
+            err, window = AXUIElementCopyAttributeValue(
+                app_ref, "AXFocusedWindow", None
+            )
+            if err != 0 or window is None:
+                return None
+
+            err, title = AXUIElementCopyAttributeValue(window, kAXTitleAttribute, None)
+            if err != 0:
+                return None
+
+            return str(title) if title else None
+        except Exception as e:
+            logger.debug(f"Failed to get window title: {e}")
+            return None
+
+    def get_current_state(self) -> FocusState:
+        try:
+            import AppKit
+
+            NSWorkspace = getattr(AppKit, "NSWorkspace")  # noqa: B009
+            workspace = NSWorkspace.sharedWorkspace()
+            frontmost = workspace.frontmostApplication()
+            if not frontmost:
+                return FocusState()
+
+            app_bundle_id = str(frontmost.bundleIdentifier())
+            pid = frontmost.processIdentifier()
+            window_title = self.get_main_window_title(pid)
+
+            return FocusState(app_bundle_id=app_bundle_id, window_title=window_title)
+        except Exception as e:
+            logger.warning(f"Failed to get focus state: {e}")
+            return FocusState()
+
     def capture_current_app(self) -> str | None:
-        """Capture and store the current frontmost application."""
         with self._lock:
-            self._current_app = self.get_frontmost_app()
-            logger.debug(f"Captured current app: {self._current_app}")
-            return self._current_app
+            self._current_state = self.get_current_state()
+            logger.debug(
+                f"Captured focus: app={self._current_state.app_bundle_id}, "
+                f"window='{self._current_state.window_title}'"
+            )
+            return self._current_state.app_bundle_id
+
+    def is_same_focus(self) -> bool:
+        with self._lock:
+            if self._current_state.app_bundle_id is None:
+                return True
+            current = self.get_current_state()
+            return (
+                current.app_bundle_id == self._current_state.app_bundle_id
+                and current.window_title == self._current_state.window_title
+            )
 
     def is_same_app_focused(self) -> bool:
-        """Check if the same app that was captured is still focused."""
         with self._lock:
-            if self._current_app is None:
+            if self._current_state.app_bundle_id is None:
                 return True
             current = self.get_frontmost_app()
-            return current == self._current_app
+            return current == self._current_state.app_bundle_id
+
+    def wait_for_focus(
+        self,
+        timeout: float = 10.0,
+        poll_interval: float = 0.1,
+    ) -> bool:
+        if self._current_state.app_bundle_id is None:
+            return True
+
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            if self.is_same_focus():
+                return True
+            time.sleep(poll_interval)
+
+        logger.warning(
+            f"Timeout waiting for focus: app={self._current_state.app_bundle_id}, "
+            f"window='{self._current_state.window_title}'"
+        )
+        return False
 
     def wait_for_app_focus(
         self,
@@ -63,7 +136,6 @@ class FocusTracker:
         timeout: float = 10.0,
         poll_interval: float = 0.1,
     ) -> bool:
-        """Wait until the specified app gains focus or timeout occurs."""
         if app_bundle_id is None:
             return True
 
@@ -79,8 +151,6 @@ class FocusTracker:
 
 
 class FocusAwareTextBuffer:
-    """Buffers text and inserts it when the target app regains focus."""
-
     def __init__(
         self,
         send_text_callback: Callable[[str], None],
@@ -90,42 +160,26 @@ class FocusAwareTextBuffer:
         self._send_text = send_text_callback
         self._focus_tracker = focus_tracker or FocusTracker()
         self._focus_timeout = focus_timeout
-        self._buffer: list[BufferedText] = []
-        self._lock = threading.Lock()
         self._target_app: str | None = None
 
     def start_capture(self) -> None:
-        """Start a capture session - records the current focused app."""
         self._target_app = self._focus_tracker.capture_current_app()
         logger.debug(f"Started capture, target app: {self._target_app}")
 
     def send_text(self, text: str) -> None:
-        """Send text, buffering if focus has changed."""
         if self._target_app is None:
-            # No capture session, send directly
             self._send_text(text)
             return
 
-        current_app = self._focus_tracker.get_frontmost_app()
-
-        if current_app == self._target_app:
-            # Same app focused, send directly
-            logger.debug("Target app focused, sending text directly")
+        if self._focus_tracker.is_same_focus():
+            logger.debug("Same focus, sending text directly")
             self._send_text(text)
         else:
-            # Focus changed, wait for it to return then send
-            logger.info(
-                f"Focus changed from {self._target_app} to {current_app}, "
-                f"waiting for focus to return before sending text"
-            )
+            logger.info("Focus changed, waiting for focus to return")
             self._wait_and_send(text)
 
     def _wait_and_send(self, text: str) -> None:
-        """Wait for focus to return and then send text."""
-        if self._focus_tracker.wait_for_app_focus(
-            self._target_app, timeout=self._focus_timeout
-        ):
-            # Small delay to ensure the app is ready to receive input
+        if self._focus_tracker.wait_for_focus(timeout=self._focus_timeout):
             time.sleep(0.1)
             logger.debug("Focus returned, sending buffered text")
             self._send_text(text)
@@ -137,6 +191,5 @@ class FocusAwareTextBuffer:
             )
 
     def end_capture(self) -> None:
-        """End the capture session."""
         self._target_app = None
         logger.debug("Ended capture session")
