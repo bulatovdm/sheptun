@@ -164,8 +164,9 @@ class BaseVoiceEngine:
 
             case ActionType.TEXT:
                 if isinstance(action.value, str):
-                    self._status.show_action(f"Ввод текста: {action.value}")
-                    self._keyboard.send_text(action.value)
+                    text = self._prepare_text(action.value)
+                    self._status.show_action(f"Ввод текста: {text}")
+                    self._keyboard.send_text(text)
 
             case ActionType.KEY:
                 if isinstance(action.value, str):
@@ -189,6 +190,11 @@ class BaseVoiceEngine:
 
     def _handle_stop(self) -> None:
         self.stop()
+
+    def _prepare_text(self, text: str) -> str:
+        if settings.auto_space and text and text[0].isalpha():
+            return " " + text
+        return text
 
 
 class VoiceEngine(BaseVoiceEngine):

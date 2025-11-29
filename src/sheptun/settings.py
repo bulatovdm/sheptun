@@ -80,6 +80,7 @@ class Settings:
     use_clipboard: bool = _get_bool("SHEPTUN_USE_CLIPBOARD", False)
     key_delay: float = _get_float("SHEPTUN_KEY_DELAY", 0.02)  # Low values may cause duplicates
     warmup_interval: float = _get_float("SHEPTUN_WARMUP_INTERVAL", 120.0)  # seconds, 0 to disable
+    auto_space: bool = _get_bool("SHEPTUN_AUTO_SPACE", True)  # Add leading space to text
 
 
 settings = Settings()

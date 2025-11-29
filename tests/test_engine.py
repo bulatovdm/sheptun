@@ -149,7 +149,7 @@ class TestBaseVoiceEngine:
             action = Action(ActionType.TEXT, "hello")
             engine._execute_action(action)
 
-            assert "hello" in keyboard.sent_text
+            assert " hello" in keyboard.sent_text  # auto_space adds leading space
 
     def test_execute_key_action(self, command_parser: CommandParser) -> None:
         status = MockStatusIndicator()
