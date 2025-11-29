@@ -11,6 +11,9 @@ class SpellCorrectorType(Enum):
     T5_RUSSIAN = "t5-russian"  # 200M, UrukHan/t5-russian-spell
 
 
+_T5_RUSSIAN_MODEL = "UrukHan/t5-russian-spell"
+
+
 class SpellCorrector(ABC):
     @abstractmethod
     def correct(self, text: str) -> str:
@@ -29,10 +32,10 @@ class T5RussianCorrector(SpellCorrector):
             T5TokenizerFast,
         )
 
-        model_name = "UrukHan/t5-russian-spell"
-        logger.info(f"Loading T5 model: {model_name}")
-        self._tokenizer: Any = T5TokenizerFast.from_pretrained(model_name)
-        self._model: Any = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+        logger.info(f"Loading T5 model: {_T5_RUSSIAN_MODEL}")
+        self._tokenizer: Any = T5TokenizerFast.from_pretrained(_T5_RUSSIAN_MODEL)
+        self._model: Any = AutoModelForSeq2SeqLM.from_pretrained(_T5_RUSSIAN_MODEL)
+        self._prefix = "Spell correct: "
         logger.info("T5 model loaded")
 
     def correct(self, text: str) -> str:
@@ -40,9 +43,8 @@ class T5RussianCorrector(SpellCorrector):
             return text
 
         try:
-            task_prefix = "Spell correct: "
             encoded = self._tokenizer(
-                task_prefix + text,
+                self._prefix + text,
                 max_length=256,
                 truncation=True,
                 return_tensors="pt",
@@ -87,3 +89,24 @@ def create_corrector(corrector_type: SpellCorrectorType | None = None) -> SpellC
 
 def correct_text(text: str) -> str:
     return get_corrector().correct(text)
+
+
+def download_model() -> None:
+    """Download spell correction model to cache."""
+    from sheptun.settings import settings
+
+    corrector_type = SpellCorrectorType(settings.spell_correction)
+
+    if corrector_type == SpellCorrectorType.NONE:
+        return
+
+    if corrector_type == SpellCorrectorType.T5_RUSSIAN:
+        from transformers import (  # type: ignore[import-untyped]
+            AutoModelForSeq2SeqLM,
+            T5TokenizerFast,
+        )
+
+        logger.info(f"Downloading T5 model: {_T5_RUSSIAN_MODEL}")
+        T5TokenizerFast.from_pretrained(_T5_RUSSIAN_MODEL)
+        AutoModelForSeq2SeqLM.from_pretrained(_T5_RUSSIAN_MODEL)
+        logger.info("T5 model downloaded")

@@ -65,10 +65,11 @@ class MockRecognizer:
 
 
 class MockKeyboardSender:
-    def __init__(self) -> None:
+    def __init__(self, cursor_position: int = -1) -> None:
         self.sent_text: list[str] = []
         self.sent_keys: list[str] = []
         self.sent_hotkeys: list[list[str]] = []
+        self._cursor_position = cursor_position
 
     def send_text(self, text: str) -> None:
         self.sent_text.append(text)
@@ -78,6 +79,18 @@ class MockKeyboardSender:
 
     def send_hotkey(self, keys: list[str]) -> None:
         self.sent_hotkeys.append(keys)
+
+    def start_capture(self) -> None:
+        pass
+
+    def end_capture(self) -> None:
+        pass
+
+    def has_text_before_cursor(self) -> bool:
+        return self._cursor_position > 0
+
+    def get_cursor_position(self) -> int:
+        return self._cursor_position
 
 
 @pytest.fixture
@@ -134,7 +147,9 @@ class TestBaseVoiceEngine:
             assert not engine.is_running()
             assert status.idle_called
 
-    def test_execute_text_action(self, command_parser: CommandParser) -> None:
+    def test_execute_text_action_first_in_session(
+        self, command_parser: CommandParser
+    ) -> None:
         status = MockStatusIndicator()
         recognizer = MockRecognizer()
         keyboard = MockKeyboardSender()
@@ -148,11 +163,27 @@ class TestBaseVoiceEngine:
             )
             action = Action(ActionType.TEXT, "hello")
             engine._execute_action(action)
-            assert "hello" in keyboard.sent_text  # first text has no leading space
+            assert "hello" in keyboard.sent_text
 
-            # Second text should have leading space
+    def test_execute_text_action_subsequent_adds_space(
+        self, command_parser: CommandParser
+    ) -> None:
+        status = MockStatusIndicator()
+        recognizer = MockRecognizer()
+        keyboard = MockKeyboardSender()
+
+        with patch("sheptun.engine.ContinuousAudioRecorder"):
+            engine = BaseVoiceEngine(
+                recognizer=recognizer,  # type: ignore[arg-type]
+                command_parser=command_parser,
+                keyboard_sender=keyboard,  # type: ignore[arg-type]
+                status_indicator=status,  # type: ignore[arg-type]
+            )
+            engine._current_window_id = "test-window"
+            action = Action(ActionType.TEXT, "hello")
             engine._execute_action(action)
-            assert " hello" in keyboard.sent_text  # auto_space adds leading space
+            engine._execute_action(action)
+            assert " hello" in keyboard.sent_text
 
     def test_execute_key_action(self, command_parser: CommandParser) -> None:
         status = MockStatusIndicator()

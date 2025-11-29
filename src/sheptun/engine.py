@@ -40,7 +40,8 @@ class BaseVoiceEngine:
         self._dataset_recorder = DatasetRecorder() if record_dataset else None
         self._state = AppState.IDLE
         self._lock = threading.Lock()
-        self._text_sent_in_session = False
+        self._current_window_id: str | None = None
+        self._window_text_sent: dict[str, bool] = {}
 
     @property
     def state(self) -> AppState:
@@ -56,7 +57,7 @@ class BaseVoiceEngine:
             if self._state != AppState.IDLE:
                 return
             self._state = AppState.RECORDING_TOGGLE
-            self._text_sent_in_session = False
+            self._window_text_sent.clear()
 
         self._on_start()
         self._recognizer.start_warmup()
@@ -113,8 +114,10 @@ class BaseVoiceEngine:
 
         audio_int16 = np.frombuffer(audio_data, dtype=np.int16)
         audio_float = audio_int16.astype(np.float32) / 32768.0
+        # Save original text as main, corrected as optional field
         save_text = original_text if original_text else text
-        path = self._dataset_recorder.save(audio_float, save_text)
+        corrected = text if original_text else None
+        path = self._dataset_recorder.save(audio_float, save_text, corrected)
         self._log(f"Saved to dataset: {path}")
         if original_text:
             self._log(f"Original: '{original_text}' -> Corrected: '{text}'")
@@ -124,6 +127,7 @@ class BaseVoiceEngine:
             return
         self._log("Speech started, capturing focus")
         self._keyboard.start_capture()
+        self._update_current_window()
 
     def _on_speech_detected(self, audio_data: bytes) -> None:
         if self.state == AppState.IDLE:
@@ -174,7 +178,8 @@ class BaseVoiceEngine:
                     text = self._prepare_text(action.value)
                     self._status.show_action(f"Ввод текста: {text}")
                     self._keyboard.send_text(text)
-                    self._text_sent_in_session = True
+                    if self._current_window_id:
+                        self._window_text_sent[self._current_window_id] = True
 
             case ActionType.KEY:
                 if isinstance(action.value, str):
@@ -200,9 +205,35 @@ class BaseVoiceEngine:
         self.stop()
 
     def _prepare_text(self, text: str) -> str:
-        if settings.auto_space and text and text[0].isalpha() and self._text_sent_in_session:
+        if not settings.auto_space or not text or not text[0].isalpha():
+            return text
+        cursor_position = self._keyboard.get_cursor_position()
+        if cursor_position > 0:
+            return " " + text
+        if cursor_position == 0 and self._current_window_id:
+            self._window_text_sent[self._current_window_id] = False
+        text_sent = self._window_text_sent.get(self._current_window_id or "", False)
+        if text_sent:
             return " " + text
         return text
+
+    def _update_current_window(self) -> None:
+        new_window = self._get_current_window_id()
+        if new_window != self._current_window_id:
+            self._log(f"Window changed: {self._current_window_id} -> {new_window}")
+        self._current_window_id = new_window
+
+    def _get_current_window_id(self) -> str | None:
+        try:
+            from sheptun.focus import FocusTracker
+
+            tracker = FocusTracker()
+            state = tracker.get_current_state()
+            if state.app_bundle_id:
+                return f"{state.app_bundle_id}:{state.window_title or ''}"
+            return None
+        except Exception:
+            return None
 
 
 class VoiceEngine(BaseVoiceEngine):

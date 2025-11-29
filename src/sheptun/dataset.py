@@ -25,12 +25,14 @@ class DatasetRecorder:
     def _generate_filename(self) -> str:
         return datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-    def save(self, audio: np.ndarray, text: str) -> Path:
+    def save(
+        self, audio: np.ndarray, text: str, corrected_text: str | None = None
+    ) -> Path:
         filename = self._generate_filename()
         audio_path = self.audio_dir / f"{filename}.wav"
 
         self._save_wav(audio_path, audio)
-        self._append_transcript(filename, text)
+        self._append_transcript(filename, text, corrected_text)
 
         return audio_path
 
@@ -43,12 +45,16 @@ class DatasetRecorder:
             wf.setframerate(SAMPLE_RATE)
             wf.writeframes(audio_int16.tobytes())
 
-    def _append_transcript(self, filename: str, text: str) -> None:
-        record = {
+    def _append_transcript(
+        self, filename: str, text: str, corrected_text: str | None = None
+    ) -> None:
+        record: dict[str, str] = {
             "file": f"{filename}.wav",
             "text": text,
             "timestamp": datetime.now().isoformat(),
         }
+        if corrected_text is not None:
+            record["corrected"] = corrected_text
 
         with self.transcripts_file.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")

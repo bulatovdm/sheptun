@@ -269,7 +269,22 @@ def _preload_whisper_model() -> None:
     model_name = settings.model
     _info(f"Загрузка модели Whisper '{model_name}'...")
     whisper.load_model(model_name)
-    _success(f"Модель '{model_name}' загружена")
+    _success(f"Модель Whisper '{model_name}' загружена")
+
+
+def _preload_spelling_model() -> None:
+    from sheptun.spelling import SpellCorrectorType, download_model
+
+    spell_type = settings.spell_correction
+    if spell_type == SpellCorrectorType.NONE.value:
+        return
+
+    _info(f"Загрузка модели коррекции '{spell_type}'...")
+    try:
+        download_model()
+        _success(f"Модель коррекции '{spell_type}' загружена")
+    except ImportError:
+        _hint("Коррекция орфографии недоступна (установите: pip install -e '.[spelling]')")
 
 
 def _get_whisper_cache_dir() -> Path:
@@ -367,12 +382,36 @@ def install_app(
 
     _kill_menubar_app()
     _preload_whisper_model()
+    _preload_spelling_model()
 
     app_dir = output or settings.app_path
     build_app(app_dir)
 
     _success(f"Приложение создано: {app_dir}")
     _hint("Теперь можно запустить из Launchpad или Finder")
+
+
+@app.command()
+def download_spelling() -> None:
+    """Загрузить модель для коррекции орфографии."""
+    from sheptun.spelling import SpellCorrectorType, download_model
+
+    spell_type = settings.spell_correction
+    if spell_type == SpellCorrectorType.NONE.value:
+        _hint("Коррекция орфографии отключена (spell_correction=none)")
+        return
+
+    _info(f"Загрузка модели '{spell_type}'...")
+    try:
+        download_model()
+        _success("Модель загружена")
+    except ImportError as e:
+        _error(f"Не установлены зависимости: {e}")
+        _hint("Выполните: pip install -e '.[spelling]'")
+        raise typer.Exit(1) from None
+    except Exception as e:
+        _error(f"Ошибка загрузки: {e}")
+        raise typer.Exit(1) from None
 
 
 @app.command()

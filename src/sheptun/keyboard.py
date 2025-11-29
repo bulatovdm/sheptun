@@ -189,6 +189,12 @@ class MacOSKeyboardSender:
     def _paste(self) -> None:
         self._send_key_event(KEY_CODES["v"].code, kCGEventFlagMaskCommand)
 
+    def has_text_before_cursor(self) -> bool:
+        return _get_cursor_position() > 0
+
+    def get_cursor_position(self) -> int:
+        return _get_cursor_position()
+
     def _send_via_events(self, text: str) -> None:
         logger.debug(f"Sending text via events: '{text}' (len={len(text)})")
         for i in range(0, len(text), MAX_UNICODE_STRING_LENGTH):
@@ -287,3 +293,56 @@ class FocusAwareKeyboardSender:
     def send_hotkey(self, keys: list[str]) -> None:
         """Send a hotkey combination."""
         self._keyboard.send_hotkey(keys)
+
+    def has_text_before_cursor(self) -> bool:
+        return self._keyboard.has_text_before_cursor()
+
+    def get_cursor_position(self) -> int:
+        return self._keyboard.get_cursor_position()
+
+
+def _get_cursor_position() -> int:
+    try:
+        import ApplicationServices as AS  # type: ignore[import-not-found,import-untyped]
+        import CoreFoundation as CF  # type: ignore[import-not-found,import-untyped]
+
+        AXUIElementCopyAttributeValue: Any = getattr(AS, "AXUIElementCopyAttributeValue")  # noqa: B009
+        AXUIElementCreateSystemWide: Any = getattr(AS, "AXUIElementCreateSystemWide")  # noqa: B009
+        kAXFocusedUIElementAttribute: Any = getattr(AS, "kAXFocusedUIElementAttribute")  # noqa: B009
+        kAXSelectedTextRangeAttribute: Any = getattr(AS, "kAXSelectedTextRangeAttribute")  # noqa: B009
+        CFRange: Any = getattr(CF, "CFRange")  # noqa: B009
+
+        system_wide: Any = AXUIElementCreateSystemWide()
+        err: Any
+        focused_element: Any
+        err, focused_element = AXUIElementCopyAttributeValue(
+            system_wide, kAXFocusedUIElementAttribute, None
+        )
+        if err != 0 or focused_element is None:
+            logger.debug(f"_get_cursor_position: no focused element (err={err})")
+            return -1
+
+        selection_range: Any
+        err, selection_range = AXUIElementCopyAttributeValue(
+            focused_element, kAXSelectedTextRangeAttribute, None
+        )
+        if err != 0 or selection_range is None:
+            logger.debug(f"_get_cursor_position: no selection range (err={err})")
+            return -1
+
+        location: int
+        if isinstance(selection_range, CFRange):
+            location = int(selection_range.location)
+        elif hasattr(selection_range, "rangeValue"):
+            location = int(selection_range.rangeValue().location)
+        elif hasattr(selection_range, "location"):
+            location = int(selection_range.location)
+        else:
+            logger.debug(f"_get_cursor_position: unknown range type {type(selection_range)}")
+            return -1
+
+        logger.debug(f"_get_cursor_position: location={location}")
+        return location
+    except Exception as e:
+        logger.debug(f"_get_cursor_position: exception {e}")
+        return -1

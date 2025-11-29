@@ -103,7 +103,7 @@ class Settings:
     warmup_interval: float = _get_float("SHEPTUN_WARMUP_INTERVAL", 120.0)  # seconds, 0 to disable
     auto_space: bool = _get_bool("SHEPTUN_AUTO_SPACE", True)  # Add leading space to text
     # Spell correction: none, t5-russian (200M)
-    spell_correction: str = _get_str("SHEPTUN_SPELL_CORRECTION", "t5-russian")
+    spell_correction: str = _get_str("SHEPTUN_SPELL_CORRECTION", "none")
 
 
 settings = Settings()
