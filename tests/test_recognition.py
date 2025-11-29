@@ -1,7 +1,11 @@
 # pyright: reportPrivateUsage=false
 import pytest
 
-from sheptun.recognition import WhisperRecognizer
+from sheptun.recognition import (
+    _REPETITIVE_PATTERN,
+    _SOUND_DESCRIPTION_PATTERN,
+    WhisperRecognizer,
+)
 
 
 class TestHallucinationFiltering:
@@ -54,3 +58,59 @@ class TestWhisperRecognizerInit:
             hallucinations=("test", "TEST", "Test"),
         )
         assert len(recognizer._hallucinations) == 1
+
+
+class TestSoundDescriptionPattern:
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "СПОКОЙНАЯ МУЗЫКА",
+            "СМЕХ",
+            "ДИНАМИЧНАЯ МУЗЫКА",
+            "СТУК В ДВЕРЬ",
+            "СМЕХ СМЕХ СМЕХ",
+            "АПЛОДИСМЕНТЫ",
+        ],
+    )
+    def test_matches_cyrillic_caps(self, text: str) -> None:
+        assert _SOUND_DESCRIPTION_PATTERN.match(text)
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Привет",
+            "СМЕХ Привет",
+            "Привет СМЕХ",
+            "давай",
+            "Hello",
+            "HELLO WORLD",
+        ],
+    )
+    def test_does_not_match_normal_text(self, text: str) -> None:
+        assert not _SOUND_DESCRIPTION_PATTERN.match(text)
+
+
+class TestRepetitivePattern:
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "а, а, а, а, а, а, а",
+            "о, о, о, о, о, о",
+            "э м О, а, а, а, а, а, а, а, а",
+            "ха, ха, ха, ха, ха, ха",
+        ],
+    )
+    def test_matches_repetitive_syllables(self, text: str) -> None:
+        assert _REPETITIVE_PATTERN.search(text)
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Привет, как дела",
+            "да, да, нет",
+            "один, два, три, четыре",
+            "а, б, в, г, д",
+        ],
+    )
+    def test_does_not_match_normal_text(self, text: str) -> None:
+        assert not _REPETITIVE_PATTERN.search(text)
