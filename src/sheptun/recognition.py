@@ -18,6 +18,9 @@ _SOUND_DESCRIPTION_PATTERN = re.compile(r"^[А-ЯЁ\s]+$")
 # Pattern for repetitive syllables (e.g., "a, a, a, a...")
 _REPETITIVE_PATTERN = re.compile(r"(.{1,3},\s*)\1{4,}")
 
+# Pattern for non-Cyrillic/non-Latin foreign scripts (Greek, Chinese, Arabic, etc.)
+_FOREIGN_SCRIPT_PATTERN = re.compile(r"[\u0370-\u03FF\u4E00-\u9FFF\u0600-\u06FF\u3040-\u30FF]")
+
 # Short silence for warmup (0.1 sec at 16kHz)
 _WARMUP_AUDIO = np.zeros(1600, dtype=np.float32)
 
@@ -131,11 +134,11 @@ class WhisperRecognizer:
         if any(h in text_lower for h in self._hallucinations):
             return True
         text_stripped = text.strip()
-        # Filter sound descriptions in Cyrillic caps (e.g., laughter, music)
         if _SOUND_DESCRIPTION_PATTERN.match(text_stripped):
             return True
-        # Filter repetitive syllables (e.g., "a, a, a, a...")
-        return bool(_REPETITIVE_PATTERN.search(text_stripped))
+        if _REPETITIVE_PATTERN.search(text_stripped):
+            return True
+        return bool(_FOREIGN_SCRIPT_PATTERN.search(text_stripped))
 
     def _bytes_to_float_array(
         self, audio_data: bytes, sample_rate: int

@@ -42,20 +42,41 @@ def _get_tuple(key: str, default: tuple[str, ...]) -> tuple[str, ...]:
 _DEFAULT_DATASET_PATH = Path("dataset")
 
 _DEFAULT_HALLUCINATIONS = (
+    # YouTube-style endings (Russian)
     "Продолжение следует...",
-    "Субтитры сделал DimaTorzworWorWorWork",
-    "Субтитры создавал DimaTorzworWorWorWorks",
-    "Субтитры делал DimaTorzworWorWorWorWorks",
+    "Спасибо за просмотр",
+    "Спасибо за внимание",
+    "Благодарю за внимание",
+    "Подписывайтесь на канал",
+    "Подписывайтесь на мой канал",
+    "Ставьте лайки",
+    "До новых встреч",
+    "До свидания",
+    "Пока",
+    "Увидимся",
+    # Subtitle credits (Russian)
+    "Субтитры сделал",
+    "Субтитры создавал",
+    "Субтитры делал",
     "Редактор субтитров",
-    "Корректор А.Егорова",
-    "Корректор А.Семкин",
-    "А.Синецкая",
+    "Корректор А.",
+    "А.Егорова",
     "А.Семкин",
-    "Спасибо за просмотр!",
-    "Спасибо за внимание.",
-    "Благодарю за внимание.",
-    "До свидания.",
-    "Пока.",
+    "А.Синецкая",
+    # YouTube-style endings (English - may appear in Russian audio)
+    "Thank you for watching",
+    "Thanks for watching",
+    "See you in the next video",
+    "Subscribe to my channel",
+    "Like and subscribe",
+    # Subtitle credits (multilingual)
+    "Amara.org",
+    "Sottotitoli",
+    "Legendas",
+    "Untertitel",
+    # Music/sound markers
+    "♪",
+    "♫",
 )
 
 

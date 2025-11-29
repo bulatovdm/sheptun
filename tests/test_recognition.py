@@ -2,6 +2,7 @@
 import pytest
 
 from sheptun.recognition import (
+    _FOREIGN_SCRIPT_PATTERN,
     _REPETITIVE_PATTERN,
     _SOUND_DESCRIPTION_PATTERN,
     WhisperRecognizer,
@@ -114,3 +115,30 @@ class TestRepetitivePattern:
     )
     def test_does_not_match_normal_text(self, text: str) -> None:
         assert not _REPETITIVE_PATTERN.search(text)
+
+
+class TestForeignScriptPattern:
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "του Xiaomi",
+            "integrating σум",
+            "это 中文 текст",
+            "арабский العربية",
+            "японский の日本語",
+        ],
+    )
+    def test_matches_foreign_scripts(self, text: str) -> None:
+        assert _FOREIGN_SCRIPT_PATTERN.search(text)
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Привет, как дела",
+            "Hello world",
+            "Тест 123",
+            "Mixed Текст",
+        ],
+    )
+    def test_does_not_match_cyrillic_latin(self, text: str) -> None:
+        assert not _FOREIGN_SCRIPT_PATTERN.search(text)
