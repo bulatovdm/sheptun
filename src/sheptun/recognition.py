@@ -15,6 +15,9 @@ logger = logging.getLogger("sheptun")
 # Pattern for sound descriptions in Cyrillic caps (e.g., laughter, music)
 _SOUND_DESCRIPTION_PATTERN = re.compile(r"^[А-ЯЁ\s]+$")
 
+# Pattern for repetitive syllables (e.g., "a, a, a, a...")
+_REPETITIVE_PATTERN = re.compile(r"(.{1,3},\s*)\1{4,}")
+
 # Short silence for warmup (0.1 sec at 16kHz)
 _WARMUP_AUDIO = np.zeros(1600, dtype=np.float32)
 
@@ -127,8 +130,12 @@ class WhisperRecognizer:
         text_lower = text.lower()
         if any(h in text_lower for h in self._hallucinations):
             return True
+        text_stripped = text.strip()
         # Filter sound descriptions in Cyrillic caps (e.g., laughter, music)
-        return bool(_SOUND_DESCRIPTION_PATTERN.match(text.strip()))
+        if _SOUND_DESCRIPTION_PATTERN.match(text_stripped):
+            return True
+        # Filter repetitive syllables (e.g., "a, a, a, a...")
+        return bool(_REPETITIVE_PATTERN.search(text_stripped))
 
     def _bytes_to_float_array(
         self, audio_data: bytes, sample_rate: int
