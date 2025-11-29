@@ -1,10 +1,14 @@
+import logging
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 import sounddevice as sd
+
+logger = logging.getLogger("sheptun.audio")
 
 DEFAULT_BLOCKSIZE = 1024
 
@@ -88,6 +92,7 @@ def _default_vad_config() -> "VoiceActivityConfig":
         silence_duration=settings.silence_duration,
         min_speech_duration=settings.min_speech_duration,
         max_speech_duration=settings.max_speech_duration,
+        idle_timeout=settings.idle_timeout,
     )
 
 
@@ -97,6 +102,7 @@ class VoiceActivityConfig:
     silence_duration: float = 0.5
     min_speech_duration: float = 0.2
     max_speech_duration: float = 30.0
+    idle_timeout: float = 5.0  # Reset buffer if no speech detected for this duration
 
 
 class EnergyVAD:
@@ -217,12 +223,14 @@ class ContinuousAudioRecorder:
             audio_config = AudioConfig(blocksize=get_vad_blocksize(vad_type_to_use))
 
         self._audio_config = audio_config
-        self._vad = create_vad(vad_config or _default_vad_config(), vad_type=vad_type_to_use)
+        self._vad_config = vad_config or _default_vad_config()
+        self._vad = create_vad(self._vad_config, vad_type=vad_type_to_use)
         self._buffer: list[bytes] = []
         self._stream: sd.InputStream | None = None
         self._running = False
         self._lock = threading.Lock()
         self._on_speech_complete: Callable[[bytes], None] | None = None
+        self._last_speech_time: float = 0.0
 
     @property
     def sample_rate(self) -> int:
@@ -237,6 +245,7 @@ class ContinuousAudioRecorder:
 
         self._running = True
         self._vad.reset()
+        self._last_speech_time = time.time()
 
         with self._lock:
             self._buffer.clear()
@@ -273,15 +282,36 @@ class ContinuousAudioRecorder:
 
         chunk = indata.tobytes()
         audio_data: bytes | None = None
+        current_time = time.time()
 
         with self._lock:
             self._buffer.append(chunk)
             speech_complete = self._vad.process_chunk(chunk, self._audio_config.sample_rate)
 
+            # Check if VAD detected any speech activity
+            if self._vad._is_speaking:
+                self._last_speech_time = current_time
+
             if speech_complete:
                 audio_data = b"".join(self._buffer)
                 self._buffer.clear()
                 self._vad.reset()
+                self._last_speech_time = current_time
+            elif self._should_reset_idle(current_time):
+                # Reset buffer if idle for too long without speech
+                buffer_duration = len(self._buffer) * self._audio_config.blocksize / self._audio_config.sample_rate
+                if buffer_duration > 0.5:  # Only log if there was something to reset
+                    logger.debug(f"Idle timeout: resetting {buffer_duration:.1f}s of buffered audio")
+                self._buffer.clear()
+                self._vad.reset()
+                self._last_speech_time = current_time
 
         if audio_data is not None and self._on_speech_complete is not None:
             self._on_speech_complete(audio_data)
+
+    def _should_reset_idle(self, current_time: float) -> bool:
+        """Check if we should reset due to idle timeout."""
+        if self._vad._is_speaking:
+            return False
+        idle_duration = current_time - self._last_speech_time
+        return idle_duration >= self._vad_config.idle_timeout

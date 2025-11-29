@@ -67,6 +67,7 @@ class Settings:
     silence_duration: float = _get_float("SHEPTUN_SILENCE_DURATION", 0.5)
     min_speech_duration: float = _get_float("SHEPTUN_MIN_SPEECH_DURATION", 0.2)
     max_speech_duration: float = _get_float("SHEPTUN_MAX_SPEECH_DURATION", 30.0)
+    idle_timeout: float = _get_float("SHEPTUN_IDLE_TIMEOUT", 5.0)  # Reset buffer after silence
     vad_type: str = _get_str("SHEPTUN_VAD_TYPE", "energy")  # energy | silero
     hotkey_toggle: str = _get_str("SHEPTUN_HOTKEY_TOGGLE", "<ctrl>+<alt>+s")
     hotkey_ptt: str = _get_str("SHEPTUN_HOTKEY_PTT", "<ctrl>+<alt>+<space>")
