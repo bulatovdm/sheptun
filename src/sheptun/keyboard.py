@@ -1,9 +1,12 @@
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any
 
 import AppKit
 import Quartz
+
+logger = logging.getLogger("sheptun.keyboard")
 
 NSPasteboard: Any = getattr(AppKit, "NSPasteboard")  # noqa: B009
 NSPasteboardTypeString: Any = getattr(AppKit, "NSPasteboardTypeString")  # noqa: B009
@@ -161,6 +164,7 @@ class MacOSKeyboardSender:
             self._send_via_events(text)
 
     def _send_via_clipboard(self, text: str) -> None:
+        logger.debug(f"Sending text via clipboard: '{text}' (len={len(text)})")
         old_contents = self._get_clipboard()
         old_change_count = self._pasteboard.changeCount()
 
@@ -172,6 +176,7 @@ class MacOSKeyboardSender:
             self._set_clipboard(old_contents)
         elif self._pasteboard.changeCount() != old_change_count:
             self._pasteboard.clearContents()
+        logger.debug("Clipboard send complete")
 
     def _get_clipboard(self) -> str | None:
         result: str | None = self._pasteboard.stringForType_(NSPasteboardTypeString)
@@ -185,15 +190,13 @@ class MacOSKeyboardSender:
         self._send_key_event(KEY_CODES["v"].code, kCGEventFlagMaskCommand)
 
     def _send_via_events(self, text: str) -> None:
-        import logging
-        logger = logging.getLogger("sheptun.keyboard")
         logger.debug(f"Sending text via events: '{text}' (len={len(text)})")
         for i in range(0, len(text), MAX_UNICODE_STRING_LENGTH):
             chunk = text[i : i + MAX_UNICODE_STRING_LENGTH]
-            logger.debug(f"Sending chunk {i//MAX_UNICODE_STRING_LENGTH}: '{chunk}'")
             self._send_unicode_string(chunk)
             if i + MAX_UNICODE_STRING_LENGTH < len(text):
                 time.sleep(self._key_delay)
+        logger.debug("Events send complete")
 
     def _send_unicode_string(self, text: str) -> None:
         key_event = CGEventCreateKeyboardEvent(None, 0, True)

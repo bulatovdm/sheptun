@@ -98,10 +98,17 @@ class FocusTracker:
             if self._current_state.app_bundle_id is None:
                 return True
             current = self.get_current_state()
-            return (
+            is_same = (
                 current.app_bundle_id == self._current_state.app_bundle_id
                 and current.window_title == self._current_state.window_title
             )
+            if not is_same:
+                logger.debug(
+                    f"Focus changed: expected app={self._current_state.app_bundle_id}, "
+                    f"window='{self._current_state.window_title}' | "
+                    f"actual app={current.app_bundle_id}, window='{current.window_title}'"
+                )
+            return is_same
 
     def is_same_app_focused(self) -> bool:
         with self._lock:
