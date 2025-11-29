@@ -33,6 +33,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+spelling = [
+    "sage>=1.1.0",
+    "transformers>=4.30.0",
+]
 dev = [
     "ruff>=0.1.0",
     "mypy>=1.7.0",
@@ -110,6 +114,8 @@ module = [
     "silero_vad.*",
     "torch.*",
     "pynput.*",
+    "sage.*",
+    "transformers.*",
 ]
 ignore_missing_imports = true
 

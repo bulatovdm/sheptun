@@ -104,6 +104,8 @@ class WhisperRecognizer:
         if self._is_hallucination(text):
             return None
 
+        text = self._apply_spell_correction(text)
+
         segments = result.get("segments", [])
         confidence = self._calculate_confidence(segments)
 
@@ -124,10 +126,17 @@ class WhisperRecognizer:
         if self._is_hallucination(text):
             return None
 
+        text = self._apply_spell_correction(text)
+
         segments = result.get("segments", [])
         confidence = self._calculate_confidence(segments)
 
         return RecognitionResult(text=text, confidence=confidence)
+
+    def _apply_spell_correction(self, text: str) -> str:
+        from sheptun.spelling import correct_text
+
+        return correct_text(text)
 
     def _is_hallucination(self, text: str) -> bool:
         text_lower = text.lower()
