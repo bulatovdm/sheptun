@@ -103,6 +103,8 @@ class Settings:
     spell_correction: str = _get_str("SHEPTUN_SPELL_CORRECTION", "none")
     # Recognizer: whisper, apple
     recognizer: str = _get_str("SHEPTUN_RECOGNIZER", "whisper")
+    # Apple Speech locale: ru-RU, en-US, etc
+    apple_locale: str = _get_str("SHEPTUN_APPLE_LOCALE", "ru-RU")
 
 
 settings = Settings()

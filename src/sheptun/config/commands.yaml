@@ -37,7 +37,9 @@ control_commands:
   "бэкспейс": { type: "key", value: "delete" }
   "backspace": { type: "key", value: "delete" }
   "удали слово": { type: "hotkey", value: ["option", "delete"] }
+  "удалить слово": { type: "hotkey", value: ["option", "delete"] }
   "удали строку": { type: "hotkey", value: ["command", "delete"] }
+  "удалить строку": { type: "hotkey", value: ["command", "delete"] }
   "хоум": { type: "key", value: "home" }
   "энд": { type: "key", value: "end" }
 

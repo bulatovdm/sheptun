@@ -4,6 +4,7 @@ from typing import Any
 
 import numpy as np
 
+from sheptun.settings import settings
 from sheptun.types import RecognitionResult
 
 logger = logging.getLogger("sheptun")
@@ -72,26 +73,26 @@ class RecognitionDelegate(NSObject):  # type: ignore[misc]
 
 
 class AppleSpeechRecognizer:
-    def __init__(self, locale: str = "ru-RU", on_device: bool = True) -> None:
-        self._locale = locale
+    def __init__(self, locale: str | None = None, on_device: bool = True) -> None:
+        self._locale = locale or settings.apple_locale
         self._on_device = on_device
-        ns_locale = NSLocale.alloc().initWithLocaleIdentifier_(locale)
+        ns_locale = NSLocale.alloc().initWithLocaleIdentifier_(self._locale)
         self._recognizer = SFSpeechRecognizer.alloc().initWithLocale_(ns_locale)
 
         if self._recognizer is None:
-            raise RuntimeError(f"Speech recognizer not available for locale: {locale}")
+            raise RuntimeError(f"Speech recognizer not available for locale: {self._locale}")
 
         if not self._recognizer.isAvailable():
             raise RuntimeError("Speech recognizer is not available")
 
         if on_device and not self._recognizer.supportsOnDeviceRecognition():
             logger.warning(
-                f"On-device recognition not supported for {locale}, falling back to server"
+                f"On-device recognition not supported for {self._locale}, falling back to server"
             )
             self._on_device = False
 
         logger.info(
-            f"AppleSpeechRecognizer initialized (locale={locale}, on_device={self._on_device})"
+            f"AppleSpeechRecognizer initialized (locale={self._locale}, on_device={self._on_device})"
         )
 
     def recognize(self, audio_data: bytes, sample_rate: int) -> RecognitionResult | None:
