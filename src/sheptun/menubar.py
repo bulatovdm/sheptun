@@ -14,7 +14,7 @@ from sheptun.i18n import t
 from sheptun.keyboard import FocusAwareKeyboardSender, MacOSKeyboardSender
 from sheptun.recognition import WhisperRecognizer
 from sheptun.settings import settings, setup_logging
-from sheptun.types import AppState
+from sheptun.types import AppState, SpeechRecognizer
 
 setup_logging()
 logger = logging.getLogger("sheptun.menubar")
@@ -68,7 +68,7 @@ class MenubarStatusIndicator:
 class MenubarVoiceEngine(BaseVoiceEngine):
     def __init__(
         self,
-        recognizer: WhisperRecognizer,
+        recognizer: SpeechRecognizer,
         command_parser: CommandParser,
         keyboard_sender: FocusAwareKeyboardSender | MacOSKeyboardSender,
         status_indicator: MenubarStatusIndicator,
@@ -219,7 +219,14 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
 
         config_path = get_config_path()
         config = CommandConfigLoader.load(config_path)
-        recognizer = WhisperRecognizer(model_name=self._model_name)
+
+        recognizer: SpeechRecognizer
+        if settings.recognizer == "apple":
+            from sheptun.apple_speech import AppleSpeechRecognizer
+            recognizer = AppleSpeechRecognizer()
+        else:
+            recognizer = WhisperRecognizer(model_name=self._model_name)
+
         command_parser = CommandParser(config)
         base_keyboard = MacOSKeyboardSender(use_clipboard=settings.use_clipboard)
         keyboard_sender = FocusAwareKeyboardSender(keyboard_sender=base_keyboard)

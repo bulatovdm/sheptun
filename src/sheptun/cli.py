@@ -264,6 +264,10 @@ def restart() -> None:
 
 
 def _preload_whisper_model() -> None:
+    if settings.recognizer == "apple":
+        _info("Используется Apple Speech Framework (без загрузки Whisper)")
+        return
+
     import whisper
 
     model_name = settings.model

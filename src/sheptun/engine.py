@@ -268,7 +268,7 @@ class VoiceEngine(BaseVoiceEngine):
         use_live_status: bool = True,
         debug: bool = False,
     ) -> "VoiceEngine":
-        recognizer = WhisperRecognizer(model_name=model_name, device=device)
+        recognizer = cls._create_recognizer(model_name, device)
         command_parser = CommandParser.from_config_file(config_path)
         keyboard_sender = MacOSKeyboardSender(use_clipboard=settings.use_clipboard)
         status_indicator: ConsoleStatusIndicator | SimpleStatusIndicator = (
@@ -283,6 +283,16 @@ class VoiceEngine(BaseVoiceEngine):
             debug=debug,
             record_dataset=settings.record_dataset,
         )
+
+    @staticmethod
+    def _create_recognizer(model_name: str, device: str | None) -> SpeechRecognizer:
+        if settings.recognizer == "apple":
+            from sheptun.apple_speech import AppleSpeechRecognizer
+            logger.info("Using Apple Speech Framework for recognition")
+            return AppleSpeechRecognizer()
+
+        logger.info(f"Using Whisper ({model_name}) for recognition")
+        return WhisperRecognizer(model_name=model_name, device=device)
 
     def _on_start(self) -> None:
         self._status.start()
