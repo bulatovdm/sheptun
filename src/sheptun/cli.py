@@ -453,5 +453,63 @@ def clear_dataset(
     _success("Датасет очищен")
 
 
+@app.command()
+def enable_autostart() -> None:
+    """Включить автозапуск Sheptun при старте системы."""
+    import subprocess
+
+    app_path = settings.app_path
+    if not app_path.exists():
+        _error(f"Приложение не найдено: {app_path}")
+        _hint("Сначала установите приложение: sheptun install-app")
+        raise typer.Exit(1)
+
+    script = f"""
+        tell application "System Events"
+            make login item at end with properties {{path:"{app_path}", hidden:false}}
+        end tell
+    """
+
+    try:
+        subprocess.run(
+            ["osascript", "-e", script],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        _success("Автозапуск включен")
+        _hint("Sheptun будет запускаться при входе в систему")
+    except subprocess.CalledProcessError as e:
+        _error(f"Ошибка: {e.stderr}")
+        raise typer.Exit(1) from e
+
+
+@app.command()
+def disable_autostart() -> None:
+    """Отключить автозапуск Sheptun."""
+    import subprocess
+
+    script = """
+        tell application "System Events"
+            delete login item "Sheptun"
+        end tell
+    """
+
+    try:
+        subprocess.run(
+            ["osascript", "-e", script],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        _success("Автозапуск отключен")
+    except subprocess.CalledProcessError as e:
+        if "Can't get login item" in e.stderr:
+            _hint("Автозапуск не был настроен")
+        else:
+            _error(f"Ошибка: {e.stderr}")
+            raise typer.Exit(1) from e
+
+
 if __name__ == "__main__":
     app()

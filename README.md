@@ -31,6 +31,8 @@ sheptun clear-dataset       # Очистить датасет для fine-tuning
 ```bash
 sheptun install-app         # Установить приложение в /Applications
 sheptun restart             # Перезапустить приложение
+sheptun enable-autostart    # Включить автозапуск при старте системы
+sheptun disable-autostart   # Отключить автозапуск
 ```
 
 После установки Sheptun появится в menubar. Приложение работает в фоне без терминала.
