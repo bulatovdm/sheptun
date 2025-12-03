@@ -98,10 +98,8 @@ class FocusTracker:
             if self._current_state.app_bundle_id is None:
                 return True
             current = self.get_current_state()
-            is_same = (
-                current.app_bundle_id == self._current_state.app_bundle_id
-                and current.window_title == self._current_state.window_title
-            )
+            is_same = self._check_focus_match(current)
+
             if not is_same:
                 logger.debug(
                     f"Focus changed: expected app={self._current_state.app_bundle_id}, "
@@ -109,6 +107,9 @@ class FocusTracker:
                     f"actual app={current.app_bundle_id}, window='{current.window_title}'"
                 )
             return is_same
+
+    def _check_focus_match(self, current: FocusState) -> bool:
+        return current.app_bundle_id == self._current_state.app_bundle_id
 
     def is_same_app_focused(self) -> bool:
         with self._lock:
@@ -162,41 +163,17 @@ class FocusAwareTextBuffer:
         self,
         send_text_callback: Callable[[str], None],
         focus_tracker: FocusTracker | None = None,
-        focus_timeout: float = 10.0,
     ) -> None:
         self._send_text = send_text_callback
         self._focus_tracker = focus_tracker or FocusTracker()
-        self._focus_timeout = focus_timeout
-        self._target_app: str | None = None
 
     def start_capture(self) -> None:
-        self._target_app = self._focus_tracker.capture_current_app()
-        logger.debug(f"Started capture, target app: {self._target_app}")
+        logger.debug("Started capture")
 
     def send_text(self, text: str) -> None:
-        if self._target_app is None:
-            self._send_text(text)
-            return
-
-        if self._focus_tracker.is_same_focus():
-            logger.debug("Same focus, sending text directly")
-            self._send_text(text)
-        else:
-            logger.info("Focus changed, waiting for focus to return")
-            self._wait_and_send(text)
-
-    def _wait_and_send(self, text: str) -> None:
-        if self._focus_tracker.wait_for_focus(timeout=self._focus_timeout):
-            time.sleep(0.1)
-            logger.debug("Focus returned, sending buffered text")
-            self._send_text(text)
-        else:
-            logger.warning(
-                f"Timeout waiting for focus, text not sent: {text[:50]}..."
-                if len(text) > 50
-                else f"Timeout waiting for focus, text not sent: {text}"
-            )
+        current_state = self._focus_tracker.get_current_state()
+        logger.debug(f"Sending text to current window: {current_state.window_title}")
+        self._send_text(text)
 
     def end_capture(self) -> None:
-        self._target_app = None
         logger.debug("Ended capture session")

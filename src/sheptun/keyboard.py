@@ -262,7 +262,6 @@ class FocusAwareKeyboardSender:
     def __init__(
         self,
         keyboard_sender: MacOSKeyboardSender | None = None,
-        focus_timeout: float = 10.0,
     ) -> None:
         from sheptun.focus import FocusAwareTextBuffer, FocusTracker
 
@@ -271,7 +270,6 @@ class FocusAwareKeyboardSender:
         self._text_buffer = FocusAwareTextBuffer(
             send_text_callback=self._keyboard.send_text,
             focus_tracker=self._focus_tracker,
-            focus_timeout=focus_timeout,
         )
 
     def start_capture(self) -> None:
