@@ -108,6 +108,33 @@ def _load_records(config: FinetuneConfig) -> list[dict[str, str]]:
     return records
 
 
+def _preprocess_split(hf_split: Any, processor: Any, output_dir: Path, split_name: str) -> int:
+    """Extract mel features + tokenize labels, save as .npz files in float16."""
+    from pathlib import Path as _Path
+
+    import librosa
+    import numpy as np
+
+    features_dir = _Path(output_dir) / "features" / split_name
+    features_dir.mkdir(parents=True, exist_ok=True)
+
+    for idx in range(len(hf_split)):
+        sample = hf_split[idx]
+        audio, _ = librosa.load(sample["audio_path"], sr=16000, mono=True)
+        features = processor.feature_extractor(audio, sampling_rate=16000, return_tensors="np")
+        labels = np.array(processor.tokenizer(sample["sentence"]).input_ids, dtype=np.int32)
+        np.savez(
+            features_dir / f"{idx}.npz",
+            input_features=features.input_features[0].astype(np.float16),
+            labels=labels,
+        )
+        if (idx + 1) % 500 == 0:
+            logger.info(f"  {split_name}: {idx + 1}/{len(hf_split)}")
+
+    logger.info(f"  {split_name}: {len(hf_split)}/{len(hf_split)} done")
+    return len(hf_split)
+
+
 def prepare_dataset(config: FinetuneConfig) -> dict[str, int]:
     """Подготовить датасет для fine-tuning из verification.db (пути + тексты)."""
     import datasets
@@ -129,6 +156,11 @@ def prepare_dataset(config: FinetuneConfig) -> dict[str, int]:
     save_path = config.output_dir / "dataset"
     save_path.parent.mkdir(parents=True, exist_ok=True)
     ds.save_to_disk(str(save_path))
+
+    logger.info("Preprocessing mel features (float16)...")
+    processor: Any = _load_processor(config.base_model)
+    _preprocess_split(ds["train"], processor, config.output_dir, "train")
+    _preprocess_split(ds["test"], processor, config.output_dir, "test")
 
     return {"total": len(records), "train": len(ds["train"]), "eval": len(ds["test"])}
 
@@ -248,8 +280,33 @@ def _load_metric(name: str) -> Any:
     return load_fn(name)
 
 
+class _PreprocessedDataset:
+    """Torch-compatible dataset that reads pre-extracted mel features from disk."""
+
+    def __init__(self, features_dir: Path) -> None:
+        from pathlib import Path as _Path
+
+        self._features_dir = _Path(features_dir)
+        self._length = len(list(self._features_dir.glob("*.npz")))
+
+    def __len__(self) -> int:
+        return self._length
+
+    def __getitem__(self, idx: int) -> dict[str, Any]:
+        import numpy as np
+        import torch
+
+        from_numpy: Any = getattr(torch, "from_numpy")  # noqa: B009
+        data: Any = np.load(self._features_dir / f"{idx}.npz")
+        features: Any = data["input_features"].astype(np.float32)
+        return {
+            "input_features": from_numpy(features),
+            "labels": data["labels"].tolist(),
+        }
+
+
 class _LazyAudioDataset:
-    """Torch-compatible dataset that loads audio on-the-fly."""
+    """Torch-compatible dataset that loads audio on-the-fly (fallback)."""
 
     def __init__(self, hf_dataset: Any, processor: Any) -> None:
         self._dataset = hf_dataset
@@ -291,7 +348,6 @@ def _make_compute_metrics(processor: Any) -> Any:
         }
 
     return compute_metrics
-
 
 
 def _create_asr_pipeline(
@@ -358,8 +414,15 @@ def train(config: FinetuneConfig, resume: bool = False) -> Path:
         total = sum(p.numel() for p in model.parameters())
         logger.info(f"LoRA: {trainable:,} trainable / {total:,} total ({trainable / total:.2%})")
 
-    train_ds = _LazyAudioDataset(ds["train"], processor)
-    eval_ds = _LazyAudioDataset(ds["test"], processor)
+    features_path = config.output_dir / "features"
+    if (features_path / "train").exists():
+        logger.info("Using preprocessed mel features")
+        train_ds: Any = _PreprocessedDataset(features_path / "train")
+        eval_ds: Any = _PreprocessedDataset(features_path / "test")
+    else:
+        logger.info("No preprocessed features, using lazy audio loading (slower)")
+        train_ds = _LazyAudioDataset(ds["train"], processor)
+        eval_ds = _LazyAudioDataset(ds["test"], processor)
 
     training_args = _get_training_args(config, device)
     data_collator = _DataCollator(
