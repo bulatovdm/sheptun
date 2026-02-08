@@ -272,3 +272,47 @@ SHEPTUN_VERIFY_MODEL=claude-haiku-4-5-20251001
 ```
 
 Результаты хранятся в SQLite (`dataset/verification.db`) — поддерживает инкрементальную обработку и возобновление после прерывания.
+
+## Fine-tuning Whisper
+
+Дообучение модели Whisper на верифицированных данных для улучшения распознавания русской речи в контексте управления терминалом. Поддерживает два метода: LoRA (рекомендуется) и полный fine-tuning. Оптимизирован для Apple Silicon (MPS).
+
+```bash
+# Установить зависимости (+ FFmpeg через brew install ffmpeg)
+pip install -e ".[finetune]"
+
+# Подготовить датасет из verification.db
+sheptun finetune-prepare
+
+# Запустить обучение (LoRA по умолчанию)
+sheptun finetune-train
+
+# С настройками
+sheptun finetune-train --method lora --steps 4000 --batch-size 4
+
+# Полный fine-tuning (больше памяти, выше качество)
+sheptun finetune-train --method full
+
+# Продолжить обучение с последнего checkpoint
+sheptun finetune-train --resume
+
+# Оценить модель (WER/CER: base vs fine-tuned)
+sheptun finetune-eval
+
+# Использовать fine-tuned модель
+SHEPTUN_MODEL=models/whisper-sheptun sheptun listen
+```
+
+Настройка в `.env`:
+
+```bash
+SHEPTUN_FINETUNE_MODEL=large             # Базовая модель (tiny/base/small/medium/large)
+SHEPTUN_FINETUNE_METHOD=lora             # Метод обучения (lora, full)
+SHEPTUN_FINETUNE_STEPS=4000              # Количество шагов
+SHEPTUN_FINETUNE_BATCH_SIZE=4            # Размер батча
+SHEPTUN_FINETUNE_LR=1e-5                 # Learning rate
+SHEPTUN_FINETUNE_OUTPUT=models/whisper-sheptun  # Куда сохранять
+SHEPTUN_FINETUNE_MIN_CONFIDENCE=medium   # Минимальный confidence из verification.db
+```
+
+Подробнее: [docs/finetune-spec.md](docs/finetune-spec.md)

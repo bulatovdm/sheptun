@@ -288,8 +288,17 @@ class VoiceEngine(BaseVoiceEngine):
     def _create_recognizer(model_name: str, device: str | None) -> SpeechRecognizer:
         if settings.recognizer == "apple":
             from sheptun.apple_speech import AppleSpeechRecognizer
+
             logger.info("Using Apple Speech Framework for recognition")
             return AppleSpeechRecognizer()
+
+        from sheptun.recognition import is_local_model
+
+        if is_local_model(model_name):
+            from sheptun.recognition import HuggingFaceWhisperRecognizer
+
+            logger.info(f"Using HuggingFace Whisper ({model_name}) for recognition")
+            return HuggingFaceWhisperRecognizer(model_path=model_name, device=device)
 
         logger.info(f"Using Whisper ({model_name}) for recognition")
         return WhisperRecognizer(model_name=model_name, device=device)

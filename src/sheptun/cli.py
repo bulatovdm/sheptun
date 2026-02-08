@@ -608,9 +608,7 @@ def verify_export(
 
     db = VerificationDB(db_path)
     try:
-        count = db.export_jsonl(
-            output_path, exclude_hallucinations=not include_hallucinations
-        )
+        count = db.export_jsonl(output_path, exclude_hallucinations=not include_hallucinations)
     finally:
         db.close()
 
@@ -618,6 +616,186 @@ def verify_export(
         _hint("Нет обработанных записей для экспорта")
     else:
         _success(f"Экспортировано {count} записей в {output_path}")
+
+
+@app.command()
+def finetune_prepare(
+    dataset: Annotated[
+        Path | None,
+        typer.Option("--dataset", "-d", help="Путь к датасету"),
+    ] = None,
+    min_confidence: Annotated[
+        str | None,
+        typer.Option("--min-confidence", help="Минимальный confidence (low, medium, high)"),
+    ] = None,
+    model: Annotated[
+        str | None,
+        typer.Option(
+            "--model", "-m", help="Базовая модель Whisper (tiny, base, small, medium, large)"
+        ),
+    ] = None,
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="Путь для сохранения"),
+    ] = None,
+) -> None:
+    """Подготовить датасет для fine-tuning из verification.db."""
+    from sheptun.finetune import config_from_settings, prepare_dataset
+
+    overrides: dict[str, object] = {}
+    if dataset:
+        overrides["dataset"] = dataset
+    if min_confidence:
+        overrides["min_confidence"] = min_confidence
+    if model:
+        overrides["model"] = model
+    if output:
+        overrides["output"] = output
+
+    config = config_from_settings(**overrides)
+
+    _info(f"Подготовка датасета из {config.dataset_path / 'verification.db'}")
+    _info(f"Базовая модель: {config.base_model}")
+    _info(f"Минимальный confidence: {config.min_confidence}")
+
+    try:
+        stats = prepare_dataset(config)
+    except FileNotFoundError as e:
+        _error(str(e))
+        raise typer.Exit(1) from None
+    except ValueError as e:
+        _error(str(e))
+        raise typer.Exit(1) from None
+
+    _success(
+        f"Датасет подготовлен: {stats['total']} записей "
+        f"(train: {stats['train']}, eval: {stats['eval']})"
+    )
+    _info(f"Сохранено в {config.output_dir / 'dataset'}")
+
+
+@app.command()
+def finetune_train(
+    method: Annotated[
+        str | None,
+        typer.Option("--method", help="Метод обучения (lora, full)"),
+    ] = None,
+    steps: Annotated[
+        int | None,
+        typer.Option("--steps", help="Количество шагов обучения"),
+    ] = None,
+    batch_size: Annotated[
+        int | None,
+        typer.Option("--batch-size", help="Размер батча"),
+    ] = None,
+    model: Annotated[
+        str | None,
+        typer.Option("--model", "-m", help="Базовая модель Whisper"),
+    ] = None,
+    lr: Annotated[
+        float | None,
+        typer.Option("--lr", help="Learning rate"),
+    ] = None,
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="Путь для сохранения модели"),
+    ] = None,
+    resume: Annotated[
+        bool,
+        typer.Option("--resume", help="Продолжить обучение с последнего checkpoint"),
+    ] = False,
+) -> None:
+    """Запустить fine-tuning модели Whisper."""
+    from sheptun.finetune import config_from_settings, train
+
+    overrides: dict[str, object] = {}
+    if method:
+        overrides["method"] = method
+    if steps:
+        overrides["steps"] = steps
+    if batch_size:
+        overrides["batch_size"] = batch_size
+    if model:
+        overrides["model"] = model
+    if lr:
+        overrides["lr"] = lr
+    if output:
+        overrides["output"] = output
+
+    config = config_from_settings(**overrides)
+
+    _info(f"Модель: {config.base_model}")
+    _info(f"Метод: {config.method}")
+    _info(f"Шаги: {config.max_steps}, batch: {config.batch_size}, lr: {config.learning_rate}")
+
+    try:
+        result_path = train(config, resume=resume)
+    except FileNotFoundError as e:
+        _error(str(e))
+        _hint("Сначала подготовьте датасет: sheptun finetune-prepare")
+        raise typer.Exit(1) from None
+    except RuntimeError as e:
+        if "out of memory" in str(e).lower() or "mps" in str(e).lower():
+            _error(f"Нехватка памяти: {e}")
+            _hint("Попробуйте: --method lora --batch-size 2")
+        else:
+            _error(str(e))
+        raise typer.Exit(1) from None
+
+    _success(f"Модель сохранена: {result_path}")
+    _hint(f"Для использования: SHEPTUN_MODEL={result_path} sheptun listen")
+
+
+@app.command()
+def finetune_eval(
+    model_path: Annotated[
+        Path | None,
+        typer.Option("--model-path", help="Путь к fine-tuned модели"),
+    ] = None,
+    base_model: Annotated[
+        str | None,
+        typer.Option("--base-model", help="Базовая модель для сравнения"),
+    ] = None,
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="Путь к директории fine-tuning"),
+    ] = None,
+) -> None:
+    """Оценить качество fine-tuned модели (WER/CER)."""
+    from sheptun.finetune import config_from_settings, evaluate
+
+    overrides: dict[str, object] = {}
+    if base_model:
+        overrides["model"] = base_model
+    if output:
+        overrides["output"] = output
+    if model_path:
+        overrides["output"] = model_path
+
+    config = config_from_settings(**overrides)
+
+    _info(f"Оценка модели: {config.output_dir}")
+    _info(f"Базовая модель: {config.base_model}")
+
+    try:
+        results = evaluate(config)
+    except FileNotFoundError as e:
+        _error(str(e))
+        raise typer.Exit(1) from None
+
+    console.print()
+    console.print("[bold]Результаты оценки:[/bold]")
+    console.print(f"  {'Метрика':<10} {'Base':<12} {'Fine-tuned':<12} {'Δ':<10}")
+    console.print(f"  {'─' * 44}")
+    for metric in ("wer", "cer"):
+        base_val = results[f"{metric}_base"]
+        ft_val = results[f"{metric}_finetuned"]
+        delta = ft_val - base_val
+        sign = "+" if delta > 0 else ""
+        console.print(
+            f"  {metric.upper():<10} {base_val:<12.2%} {ft_val:<12.2%} {sign}{delta:<10.2%}"
+        )
+    console.print()
 
 
 @app.command()

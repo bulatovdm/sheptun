@@ -42,6 +42,17 @@ spelling = [
 verification = [
     "claude-agent-sdk>=0.1.0",
 ]
+finetune = [
+    "transformers>=4.36.0",
+    "datasets>=2.14.0",
+    "accelerate>=0.25.0",
+    "evaluate>=0.4.0",
+    "jiwer>=3.0.0",
+    "tensorboard>=2.14.0",
+    "peft>=0.7.0",
+    "soundfile>=0.12.0",
+    "librosa>=0.10.0",
+]
 dev = [
     "ruff>=0.1.0",
     "mypy>=1.7.0",
@@ -128,6 +139,14 @@ module = [
     "sage.*",
     "transformers.*",
     "claude_agent_sdk.*",
+    "datasets.*",
+    "evaluate.*",
+    "peft.*",
+    "jiwer.*",
+    "accelerate.*",
+    "tensorboard.*",
+    "soundfile.*",
+    "librosa.*",
 ]
 ignore_missing_imports = true
 

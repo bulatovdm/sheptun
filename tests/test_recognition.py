@@ -5,60 +5,53 @@ from sheptun.recognition import (
     _FOREIGN_SCRIPT_PATTERN,
     _REPETITIVE_PATTERN,
     _SOUND_DESCRIPTION_PATTERN,
-    WhisperRecognizer,
+    _check_hallucination,
 )
 
 
 class TestHallucinationFiltering:
     @pytest.fixture
-    def recognizer(self) -> WhisperRecognizer:
-        return WhisperRecognizer(
-            model_name="tiny",
-            hallucinations=(
-                "Продолжение следует...",
-                "Спасибо за просмотр!",
-                "Test Hallucination",
-            ),
-        )
+    def hallucinations(self) -> set[str]:
+        return {
+            "продолжение следует...",
+            "спасибо за просмотр!",
+            "test hallucination",
+        }
 
-    def test_is_hallucination_exact_match(self, recognizer: WhisperRecognizer) -> None:
-        assert recognizer._is_hallucination("Продолжение следует...") is True
+    def test_is_hallucination_exact_match(self, hallucinations: set[str]) -> None:
+        assert _check_hallucination("Продолжение следует...", hallucinations) is True
 
-    def test_is_hallucination_case_insensitive(self, recognizer: WhisperRecognizer) -> None:
-        assert recognizer._is_hallucination("ПРОДОЛЖЕНИЕ СЛЕДУЕТ...") is True
-        assert recognizer._is_hallucination("test hallucination") is True
-        assert recognizer._is_hallucination("TEST HALLUCINATION") is True
+    def test_is_hallucination_case_insensitive(self, hallucinations: set[str]) -> None:
+        assert _check_hallucination("ПРОДОЛЖЕНИЕ СЛЕДУЕТ...", hallucinations) is True
+        assert _check_hallucination("test hallucination", hallucinations) is True
+        assert _check_hallucination("TEST HALLUCINATION", hallucinations) is True
 
-    def test_is_hallucination_not_matching(self, recognizer: WhisperRecognizer) -> None:
-        assert recognizer._is_hallucination("Привет мир") is False
-        assert recognizer._is_hallucination("клод") is False
+    def test_is_hallucination_not_matching(self, hallucinations: set[str]) -> None:
+        assert _check_hallucination("Привет мир", hallucinations) is False
+        assert _check_hallucination("клод", hallucinations) is False
 
     def test_is_hallucination_partial_match_not_filtered(
-        self, recognizer: WhisperRecognizer
+        self, hallucinations: set[str]
     ) -> None:
-        assert recognizer._is_hallucination("Продолжение") is False
-        assert recognizer._is_hallucination("Спасибо") is False
+        assert _check_hallucination("Продолжение", hallucinations) is False
+        assert _check_hallucination("Спасибо", hallucinations) is False
 
     def test_custom_hallucinations_override_defaults(self) -> None:
-        recognizer = WhisperRecognizer(
-            model_name="tiny",
-            hallucinations=("Custom phrase",),
-        )
-        assert recognizer._is_hallucination("Custom phrase") is True
-        assert recognizer._is_hallucination("Продолжение следует...") is False
+        custom = {"custom phrase"}
+        assert _check_hallucination("Custom phrase", custom) is True
+        assert _check_hallucination("Продолжение следует...", custom) is False
 
 
 class TestWhisperRecognizerInit:
-    def test_default_hallucinations_from_settings(self) -> None:
-        recognizer = WhisperRecognizer(model_name="tiny")
-        assert recognizer._is_hallucination("Продолжение следует...") is True
+    def test_default_hallucinations(self) -> None:
+        from sheptun.settings import settings
 
-    def test_hallucinations_stored_as_set(self) -> None:
-        recognizer = WhisperRecognizer(
-            model_name="tiny",
-            hallucinations=("test", "TEST", "Test"),
-        )
-        assert len(recognizer._hallucinations) == 1
+        hallucinations = {h.lower() for h in settings.hallucinations}
+        assert _check_hallucination("Продолжение следует...", hallucinations) is True
+
+    def test_hallucinations_set_dedup(self) -> None:
+        hallucinations = {h.lower() for h in ("test", "TEST", "Test")}
+        assert len(hallucinations) == 1
 
 
 class TestSoundDescriptionPattern:

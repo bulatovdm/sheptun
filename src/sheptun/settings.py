@@ -109,6 +109,15 @@ class Settings:
     verify_model: str | None = _get_optional_str("SHEPTUN_VERIFY_MODEL")
     # Parallel requests for verification (1 = sequential)
     verify_concurrency: int = int(_get_float("SHEPTUN_VERIFY_CONCURRENCY", 1))
+    # Fine-tuning
+    finetune_model: str = _get_str("SHEPTUN_FINETUNE_MODEL", "large")
+    finetune_method: str = _get_str("SHEPTUN_FINETUNE_METHOD", "lora")
+    finetune_steps: int = int(_get_float("SHEPTUN_FINETUNE_STEPS", 4000))
+    finetune_batch_size: int = int(_get_float("SHEPTUN_FINETUNE_BATCH_SIZE", 4))
+    finetune_lr: float = _get_float("SHEPTUN_FINETUNE_LR", 1e-5)
+    finetune_warmup_steps: int = int(_get_float("SHEPTUN_FINETUNE_WARMUP_STEPS", 500))
+    finetune_output: Path = _get_path("SHEPTUN_FINETUNE_OUTPUT", Path("models/whisper-sheptun"))
+    finetune_min_confidence: str = _get_str("SHEPTUN_FINETUNE_MIN_CONFIDENCE", "medium")
 
 
 settings = Settings()

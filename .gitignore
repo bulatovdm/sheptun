@@ -50,6 +50,9 @@ logs/
 # Dataset for fine-tuning (default path)
 dataset/
 
+# Fine-tuned models
+models/
+
 # OS
 .DS_Store
 Thumbs.db

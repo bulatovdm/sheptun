@@ -12,60 +12,135 @@ from sheptun.types import RecognitionResult
 
 logger = logging.getLogger("sheptun")
 
-# Pattern for sound descriptions in Cyrillic caps (e.g., laughter, music)
 _SOUND_DESCRIPTION_PATTERN = re.compile(r"^[А-ЯЁ\s]+$")
-
-# Pattern for repetitive syllables (e.g., "a, a, a, a...")
 _REPETITIVE_PATTERN = re.compile(r"(.{1,3},\s*)\1{4,}")
-
-# Pattern for non-Cyrillic/non-Latin foreign scripts (Greek, Chinese, Arabic, etc.)
 _FOREIGN_SCRIPT_PATTERN = re.compile(r"[\u0370-\u03FF\u4E00-\u9FFF\u0600-\u06FF\u3040-\u30FF]")
-
-# Short silence for warmup (0.1 sec at 16kHz)
 _WARMUP_AUDIO = np.zeros(1600, dtype=np.float32)
 
 
-class WhisperRecognizer:
-    def __init__(
-        self,
-        model_name: str = "base",
-        device: str | None = None,
-        hallucinations: tuple[str, ...] | None = None,
-        warmup_interval: float | None = None,
-    ) -> None:
-        self._model: Any = whisper.load_model(model_name, device=device)
-        self._model_name = model_name
-        self._hallucinations = {
-            h.lower() for h in (hallucinations or settings.hallucinations)
-        }
+def is_local_model(model_name: str) -> bool:
+    return Path(model_name).is_dir()
+
+
+def _check_hallucination(text: str, hallucinations: set[str]) -> bool:
+    text_lower = text.lower()
+    if any(h in text_lower for h in hallucinations):
+        return True
+    text_stripped = text.strip()
+    if _SOUND_DESCRIPTION_PATTERN.match(text_stripped):
+        return True
+    if _REPETITIVE_PATTERN.search(text_stripped):
+        return True
+    return bool(_FOREIGN_SCRIPT_PATTERN.search(text_stripped))
+
+
+def _bytes_to_float_array(audio_data: bytes, sample_rate: int) -> np.ndarray[Any, Any] | None:
+    if len(audio_data) == 0:
+        return None
+
+    audio_int16 = np.frombuffer(audio_data, dtype=np.int16)
+    audio_float32 = audio_int16.astype(np.float32) / 32768.0
+
+    if sample_rate != 16000:
+        audio_float32 = _resample(audio_float32, sample_rate, 16000)
+
+    audio_float32 = _trim_silence(audio_float32, sample_rate)
+    return audio_float32
+
+
+def _trim_silence(
+    audio: np.ndarray[Any, Any],
+    sample_rate: int,
+    threshold: float = 0.01,
+    window_ms: int = 20,
+) -> np.ndarray[Any, Any]:
+    window_size = int(sample_rate * window_ms / 1000)
+    if len(audio) < window_size:
+        return audio
+
+    start = _find_speech_boundary(audio, window_size, threshold, sample_rate, from_start=True)
+    end = _find_speech_boundary(audio, window_size, threshold, sample_rate, from_start=False)
+
+    trimmed = audio[start:end]
+    trimmed_duration = (len(audio) - len(trimmed)) / sample_rate
+    if trimmed_duration > 0.1:
+        logger.debug(f"Trimmed {trimmed_duration:.2f}s silence")
+
+    return trimmed
+
+
+def _find_speech_boundary(
+    audio: np.ndarray[Any, Any],
+    window_size: int,
+    threshold: float,
+    sample_rate: int,
+    *,
+    from_start: bool,
+) -> int:
+    if from_start:
+        for i in range(0, len(audio) - window_size, window_size):
+            window = audio[i : i + window_size]
+            energy = np.sqrt(np.mean(window**2))
+            if energy > threshold:
+                return max(0, i - int(sample_rate * 0.05))
+        return 0
+
+    for i in range(len(audio) - window_size, 0, -window_size):
+        window = audio[i : i + window_size]
+        energy = np.sqrt(np.mean(window**2))
+        if energy > threshold:
+            return min(len(audio), i + window_size + int(sample_rate * 0.05))
+    return len(audio)
+
+
+def _resample(audio: np.ndarray[Any, Any], orig_sr: int, target_sr: int) -> np.ndarray[Any, Any]:
+    if orig_sr == target_sr:
+        return audio
+
+    duration = len(audio) / orig_sr
+    target_length = int(duration * target_sr)
+    indices = np.linspace(0, len(audio) - 1, target_length)
+    resampled: np.ndarray[Any, Any] = np.interp(indices, np.arange(len(audio)), audio).astype(
+        np.float32
+    )
+    return resampled
+
+
+def _apply_spell_correction(text: str) -> str:
+    from sheptun.spelling import correct_text
+
+    return correct_text(text)
+
+
+class _WarmupMixin:
+    _warmup_interval: float
+    _warmup_timer: threading.Timer | None
+    _warmup_lock: threading.Lock
+
+    def _init_warmup(self, warmup_interval: float | None) -> None:
         self._warmup_interval = (
             warmup_interval if warmup_interval is not None else settings.warmup_interval
         )
-        self._warmup_timer: threading.Timer | None = None
+        self._warmup_timer = None
         self._warmup_lock = threading.Lock()
 
-    @property
-    def model_name(self) -> str:
-        return self._model_name
+    def _do_warmup(self) -> None:
+        raise NotImplementedError
 
     def warmup(self) -> None:
-        """Run a quick inference on silence to keep the model in GPU memory."""
         try:
-            self._model.transcribe(_WARMUP_AUDIO, language="ru", fp16=False)
+            self._do_warmup()
             logger.debug("Warmup completed")
         except Exception as e:
             logger.debug(f"Warmup error: {e}")
 
     def start_warmup(self) -> None:
-        """Start periodic warmup to keep model in memory."""
         if self._warmup_interval <= 0:
             return
-
         self._schedule_warmup()
         logger.debug(f"Warmup started with interval {self._warmup_interval}s")
 
     def stop_warmup(self) -> None:
-        """Stop periodic warmup."""
         with self._warmup_lock:
             if self._warmup_timer is not None:
                 self._warmup_timer.cancel()
@@ -76,7 +151,6 @@ class WhisperRecognizer:
         with self._warmup_lock:
             if self._warmup_timer is not None:
                 self._warmup_timer.cancel()
-
             self._warmup_timer = threading.Timer(self._warmup_interval, self._warmup_tick)
             self._warmup_timer.daemon = True
             self._warmup_timer.start()
@@ -85,8 +159,29 @@ class WhisperRecognizer:
         self.warmup()
         self._schedule_warmup()
 
+
+class WhisperRecognizer(_WarmupMixin):
+    def __init__(
+        self,
+        model_name: str = "base",
+        device: str | None = None,
+        hallucinations: tuple[str, ...] | None = None,
+        warmup_interval: float | None = None,
+    ) -> None:
+        self._model: Any = whisper.load_model(model_name, device=device)
+        self._model_name = model_name
+        self._hallucinations = {h.lower() for h in (hallucinations or settings.hallucinations)}
+        self._init_warmup(warmup_interval)
+
+    @property
+    def model_name(self) -> str:
+        return self._model_name
+
+    def _do_warmup(self) -> None:
+        self._model.transcribe(_WARMUP_AUDIO, language="ru", fp16=False)
+
     def recognize(self, audio_data: bytes, sample_rate: int) -> RecognitionResult | None:
-        audio_array = self._bytes_to_float_array(audio_data, sample_rate)
+        audio_array = _bytes_to_float_array(audio_data, sample_rate)
         if audio_array is None:
             return None
 
@@ -101,10 +196,10 @@ class WhisperRecognizer:
         if not original_text:
             return None
 
-        if self._is_hallucination(original_text):
+        if _check_hallucination(original_text, self._hallucinations):
             return None
 
-        corrected_text = self._apply_spell_correction(original_text)
+        corrected_text = _apply_spell_correction(original_text)
 
         segments = result.get("segments", [])
         confidence = self._calculate_confidence(segments)
@@ -127,10 +222,10 @@ class WhisperRecognizer:
         if not original_text:
             return None
 
-        if self._is_hallucination(original_text):
+        if _check_hallucination(original_text, self._hallucinations):
             return None
 
-        corrected_text = self._apply_spell_correction(original_text)
+        corrected_text = _apply_spell_correction(original_text)
 
         segments = result.get("segments", [])
         confidence = self._calculate_confidence(segments)
@@ -140,101 +235,6 @@ class WhisperRecognizer:
             confidence=confidence,
             original_text=original_text if corrected_text != original_text else None,
         )
-
-    def _apply_spell_correction(self, text: str) -> str:
-        from sheptun.spelling import correct_text
-
-        return correct_text(text)
-
-    def _is_hallucination(self, text: str) -> bool:
-        text_lower = text.lower()
-        if any(h in text_lower for h in self._hallucinations):
-            return True
-        text_stripped = text.strip()
-        if _SOUND_DESCRIPTION_PATTERN.match(text_stripped):
-            return True
-        if _REPETITIVE_PATTERN.search(text_stripped):
-            return True
-        return bool(_FOREIGN_SCRIPT_PATTERN.search(text_stripped))
-
-    def _bytes_to_float_array(
-        self, audio_data: bytes, sample_rate: int
-    ) -> np.ndarray[Any, Any] | None:
-        if len(audio_data) == 0:
-            return None
-
-        audio_int16 = np.frombuffer(audio_data, dtype=np.int16)
-        audio_float32 = audio_int16.astype(np.float32) / 32768.0
-
-        if sample_rate != 16000:
-            audio_float32 = self._resample(audio_float32, sample_rate, 16000)
-
-        audio_float32 = self._trim_silence(audio_float32, sample_rate)
-
-        return audio_float32
-
-    def _trim_silence(
-        self,
-        audio: np.ndarray[Any, Any],
-        sample_rate: int,
-        threshold: float = 0.01,
-        window_ms: int = 20,
-    ) -> np.ndarray[Any, Any]:
-        window_size = int(sample_rate * window_ms / 1000)
-        if len(audio) < window_size:
-            return audio
-
-        start = self._find_speech_start(audio, window_size, threshold, sample_rate)
-        end = self._find_speech_end(audio, window_size, threshold, sample_rate)
-
-        trimmed = audio[start:end]
-        trimmed_duration = (len(audio) - len(trimmed)) / sample_rate
-        if trimmed_duration > 0.1:
-            logger.debug(f"Trimmed {trimmed_duration:.2f}s silence")
-
-        return trimmed
-
-    def _find_speech_start(
-        self,
-        audio: np.ndarray[Any, Any],
-        window_size: int,
-        threshold: float,
-        sample_rate: int,
-    ) -> int:
-        for i in range(0, len(audio) - window_size, window_size):
-            window = audio[i : i + window_size]
-            energy = np.sqrt(np.mean(window**2))
-            if energy > threshold:
-                return max(0, i - int(sample_rate * 0.05))
-        return 0
-
-    def _find_speech_end(
-        self,
-        audio: np.ndarray[Any, Any],
-        window_size: int,
-        threshold: float,
-        sample_rate: int,
-    ) -> int:
-        for i in range(len(audio) - window_size, 0, -window_size):
-            window = audio[i : i + window_size]
-            energy = np.sqrt(np.mean(window**2))
-            if energy > threshold:
-                return min(len(audio), i + window_size + int(sample_rate * 0.05))
-        return len(audio)
-
-    def _resample(
-        self, audio: np.ndarray[Any, Any], orig_sr: int, target_sr: int
-    ) -> np.ndarray[Any, Any]:
-        if orig_sr == target_sr:
-            return audio
-
-        duration = len(audio) / orig_sr
-        target_length = int(duration * target_sr)
-        indices = np.linspace(0, len(audio) - 1, target_length)
-        resampled: np.ndarray[Any, Any] = np.interp(indices, np.arange(len(audio)), audio).astype(
-            np.float32
-        )
-        return resampled
 
     def _calculate_confidence(self, segments: list[dict[str, Any]]) -> float:
         if not segments:
@@ -259,3 +259,72 @@ class WhisperRecognizer:
             return 0.0
 
         return float(total_prob / total_tokens)
+
+
+class HuggingFaceWhisperRecognizer(_WarmupMixin):
+    def __init__(
+        self,
+        model_path: str,
+        device: str | None = None,
+        hallucinations: tuple[str, ...] | None = None,
+        warmup_interval: float | None = None,
+    ) -> None:
+        self._model_path = model_path
+        self._hallucinations = {h.lower() for h in (hallucinations or settings.hallucinations)}
+        self._init_warmup(warmup_interval)
+
+        detect_device = device or self._detect_device()
+
+        self._pipe = _create_asr_pipeline(model=model_path, device=detect_device)
+
+    @property
+    def model_name(self) -> str:
+        return self._model_path
+
+    def _do_warmup(self) -> None:
+        self._pipe(_WARMUP_AUDIO)
+
+    def recognize(self, audio_data: bytes, sample_rate: int) -> RecognitionResult | None:
+        audio_array = _bytes_to_float_array(audio_data, sample_rate)
+        if audio_array is None:
+            return None
+
+        result = self._pipe(audio_array, return_timestamps=False)
+        text = result.get("text", "").strip()
+        if not text:
+            return None
+
+        if _check_hallucination(text, self._hallucinations):
+            return None
+
+        corrected = _apply_spell_correction(text)
+
+        return RecognitionResult(
+            text=corrected,
+            confidence=1.0,
+            original_text=text if corrected != text else None,
+        )
+
+    @staticmethod
+    def _detect_device() -> str:
+        import torch
+
+        if torch.backends.mps.is_available():
+            return "mps"
+        if torch.cuda.is_available():
+            return "cuda"
+        return "cpu"
+
+
+def _create_asr_pipeline(
+    model: str,
+    device: str,
+) -> Any:
+    from transformers import pipeline
+
+    return pipeline(
+        "automatic-speech-recognition",
+        model=model,
+        device=device,
+        generate_kwargs={"language": "russian", "task": "transcribe"},
+    )
