@@ -494,6 +494,16 @@ def verify_dataset(
             help="Сбросить все результаты и обработать заново",
         ),
     ] = False,
+    concurrency: Annotated[
+        int,
+        typer.Option(
+            "--concurrency",
+            "-j",
+            help="Количество параллельных запросов к Claude",
+            min=1,
+            max=10,
+        ),
+    ] = 1,
 ) -> None:
     """Верифицировать транскрипции через Claude."""
     import anyio
@@ -517,7 +527,8 @@ def verify_dataset(
                 return
 
     model_name = model or settings.verify_model
-    anyio.run(run_verification, dataset, limit, model_name)
+    jobs = concurrency if concurrency > 1 else settings.verify_concurrency
+    anyio.run(run_verification, dataset, limit, model_name, jobs)
 
 
 @app.command()

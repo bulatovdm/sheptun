@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import sqlite3
@@ -311,6 +312,7 @@ async def run_verification(
     dataset_path: Path | None = None,
     limit: int | None = None,
     model: str | None = None,
+    concurrency: int = 1,
 ) -> None:
     ds_path = dataset_path or settings.dataset_path
     transcripts_file = ds_path / "transcripts.jsonl"
@@ -334,17 +336,25 @@ async def run_verification(
             return
 
         total = len(pending)
-        console.print(f"[yellow]Обработка {total} записей...[/yellow]\n")
+        if concurrency > 1:
+            console.print(
+                f"[yellow]Обработка {total} записей ({concurrency} потоков)...[/yellow]\n"
+            )
+        else:
+            console.print(f"[yellow]Обработка {total} записей...[/yellow]\n")
 
         verifier = ClaudeVerifier(model=model)
+        completed_count = 0
 
-        for i, record in enumerate(pending, 1):
+        async def process_record(record: TranscriptRecord) -> None:
+            nonlocal completed_count
             try:
                 result, model_used = await verifier.verify_single(record)
                 db.save_result(record.file, result, model_used)
+                completed_count += 1
 
                 status = "[green]OK[/green]" if result.is_correct else "[yellow]FIXED[/yellow]"
-                console.print(f"[{i}/{total}] {status} {record.file}")
+                console.print(f"[{completed_count}/{total}] {status} {record.file}")
                 if not result.is_correct:
                     console.print(f"  [dim]{record.text}[/dim]")
                     console.print(f"  [cyan]{result.verified_text}[/cyan]")
@@ -352,7 +362,20 @@ async def run_verification(
                         console.print(f"  [dim italic]{result.notes}[/dim italic]")
             except Exception as e:
                 db.save_error(record.file, str(e))
-                console.print(f"[{i}/{total}] [red]ERROR[/red] {record.file}: {e}")
+                completed_count += 1
+                console.print(f"[{completed_count}/{total}] [red]ERROR[/red] {record.file}: {e}")
+
+        if concurrency <= 1:
+            for record in pending:
+                await process_record(record)
+        else:
+            semaphore = asyncio.Semaphore(concurrency)
+
+            async def limited(record: TranscriptRecord) -> None:
+                async with semaphore:
+                    await process_record(record)
+
+            await asyncio.gather(*(limited(r) for r in pending))
 
         console.print()
         stats = db.get_stats()

@@ -29,6 +29,14 @@ sheptun restart             # Restart menubar app
 sheptun list-models         # Show downloaded Whisper models
 sheptun cleanup-models      # Remove unused models
 sheptun clear-dataset       # Clear dataset for fine-tuning
+
+# Transcript verification (requires: pip install -e ".[verification]")
+sheptun verify-dataset      # Verify transcriptions via Claude
+sheptun verify-dataset -n 10  # Test on 10 records
+sheptun verify-dataset --retry  # Retry failed records
+sheptun verify-dataset --reset  # Reset all and re-process
+sheptun verify-status       # Show verification stats
+sheptun verify-export       # Export verified transcripts to JSONL
 ```
 
 ## Architecture
@@ -48,6 +56,7 @@ src/sheptun/
 ├── settings.py     # Settings from .env
 ├── dataset.py      # DatasetRecorder for fine-tuning data collection
 ├── i18n.py         # Russian translations
+├── verification.py # Transcript verification via Claude Agent SDK
 ├── app_builder.py  # macOS .app bundle builder
 └── types.py        # Protocols, dataclasses, enums (AppState)
 ```
@@ -72,6 +81,7 @@ Command config: `./sheptun.yaml` or `~/.config/sheptun/commands.yaml`
 - Quartz CGEventCreateKeyboardEvent for keyboard simulation
 - Hallucination filtering in `recognition.py` (configurable via `SHEPTUN_HALLUCINATIONS`)
 - Settings loaded once at import via dotenv (restart needed for changes)
+- Transcript verification: SQLite DB (`dataset/verification.db`), Claude Agent SDK, async processing
 
 ## Code Style
 

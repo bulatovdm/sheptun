@@ -107,6 +107,8 @@ class Settings:
     apple_locale: str = _get_str("SHEPTUN_APPLE_LOCALE", "ru-RU")
     # Claude model for transcript verification
     verify_model: str | None = _get_optional_str("SHEPTUN_VERIFY_MODEL")
+    # Parallel requests for verification (1 = sequential)
+    verify_concurrency: int = int(_get_float("SHEPTUN_VERIFY_CONCURRENCY", 1))
 
 
 settings = Settings()
