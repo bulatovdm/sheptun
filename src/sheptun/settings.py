@@ -105,6 +105,8 @@ class Settings:
     recognizer: str = _get_str("SHEPTUN_RECOGNIZER", "whisper")
     # Apple Speech locale: ru-RU, en-US, etc
     apple_locale: str = _get_str("SHEPTUN_APPLE_LOCALE", "ru-RU")
+    # Claude model for transcript verification
+    verify_model: str | None = _get_optional_str("SHEPTUN_VERIFY_MODEL")
 
 
 settings = Settings()

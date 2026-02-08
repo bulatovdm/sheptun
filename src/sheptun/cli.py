@@ -454,6 +454,152 @@ def clear_dataset(
 
 
 @app.command()
+def verify_dataset(
+    limit: Annotated[
+        int | None,
+        typer.Option(
+            "--limit",
+            "-n",
+            help="Количество записей для обработки",
+        ),
+    ] = None,
+    model: Annotated[
+        str | None,
+        typer.Option(
+            "--model",
+            "-m",
+            help="Модель Claude (по умолчанию из Agent SDK)",
+        ),
+    ] = None,
+    dataset: Annotated[
+        Path | None,
+        typer.Option(
+            "--dataset",
+            "-d",
+            help="Путь к датасету",
+        ),
+    ] = None,
+    retry: Annotated[
+        bool,
+        typer.Option(
+            "--retry",
+            "-r",
+            help="Повторить обработку записей с ошибками",
+        ),
+    ] = False,
+    reset: Annotated[
+        bool,
+        typer.Option(
+            "--reset",
+            help="Сбросить все результаты и обработать заново",
+        ),
+    ] = False,
+) -> None:
+    """Верифицировать транскрипции через Claude."""
+    import anyio
+
+    from sheptun.verification import VerificationDB, run_verification
+
+    ds_path = dataset or settings.dataset_path
+    db_path = ds_path / "verification.db"
+
+    if (retry or reset) and db_path.exists():
+        db = VerificationDB(db_path)
+        try:
+            count = db.reset_all() if reset else db.reset_errors()
+        finally:
+            db.close()
+        if count > 0:
+            _info(f"Сброшено {count} записей для повторной обработки")
+        else:
+            _hint("Нет записей для сброса")
+            if not reset:
+                return
+
+    model_name = model or settings.verify_model
+    anyio.run(run_verification, dataset, limit, model_name)
+
+
+@app.command()
+def verify_status(
+    dataset: Annotated[
+        Path | None,
+        typer.Option(
+            "--dataset",
+            "-d",
+            help="Путь к датасету",
+        ),
+    ] = None,
+) -> None:
+    """Показать статус верификации транскрипций."""
+    from sheptun.verification import VerificationDB
+
+    ds_path = dataset or settings.dataset_path
+    db_path = ds_path / "verification.db"
+
+    if not db_path.exists():
+        _hint("База верификации не найдена. Запустите verify-dataset.")
+        return
+
+    db = VerificationDB(db_path)
+    try:
+        stats = db.get_stats()
+    finally:
+        db.close()
+
+    console.print(f"\n[bold]Верификация транскрипций:[/bold] {db_path}")
+    console.print(f"  Всего: {stats.get('total', 0)}")
+    console.print(f"  Ожидают: [yellow]{stats.get('pending', 0)}[/yellow]")
+    console.print(f"  Обработано: [green]{stats.get('completed', 0)}[/green]")
+    console.print(f"    Верных: {stats.get('correct', 0)}")
+    console.print(f"    Исправлено: {stats.get('fixed', 0)}")
+    console.print(f"  Ошибок: [red]{stats.get('error', 0)}[/red]")
+
+
+@app.command()
+def verify_export(
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Путь к выходному файлу",
+        ),
+    ] = None,
+    dataset: Annotated[
+        Path | None,
+        typer.Option(
+            "--dataset",
+            "-d",
+            help="Путь к датасету",
+        ),
+    ] = None,
+) -> None:
+    """Экспортировать верифицированные транскрипции в JSONL."""
+    from sheptun.verification import VerificationDB
+
+    ds_path = dataset or settings.dataset_path
+    db_path = ds_path / "verification.db"
+
+    if not db_path.exists():
+        _error("База верификации не найдена. Запустите verify-dataset.")
+        raise typer.Exit(1)
+
+    output_path = output or (ds_path / "transcripts_verified.jsonl")
+
+    db = VerificationDB(db_path)
+    try:
+        count = db.export_jsonl(output_path)
+    finally:
+        db.close()
+
+    if count == 0:
+        _hint("Нет обработанных записей для экспорта")
+    else:
+        _success(f"Экспортировано {count} записей в {output_path}")
+
+
+@app.command()
 def enable_autostart() -> None:
     """Включить автозапуск Sheptun при старте системы."""
     import subprocess

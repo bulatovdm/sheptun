@@ -39,6 +39,9 @@ spelling = [
     "transformers>=4.30.0",
     "sentencepiece>=0.1.99",
 ]
+verification = [
+    "claude-agent-sdk>=0.1.0",
+]
 dev = [
     "ruff>=0.1.0",
     "mypy>=1.7.0",
@@ -124,6 +127,7 @@ module = [
     "pynput.*",
     "sage.*",
     "transformers.*",
+    "claude_agent_sdk.*",
 ]
 ignore_missing_imports = true
 
