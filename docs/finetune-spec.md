@@ -12,8 +12,10 @@
   - `original_text` — транскрипция Whisper
   - `verified_text` — исправленная транскрипция от Claude
   - `is_correct` — менять ли текст
+  - `is_hallucination` — весь текст является галлюцинацией Whisper (мусор, повторы, чужие скрипты)
   - `confidence` — high / medium / low
 - Для fine-tuning используем: аудио + `verified_text` (если есть) или `original_text` (если `is_correct=1`)
+- **Исключаем** записи с `is_hallucination=1` — это мусорные транскрипции без полезного текста
 
 ## Технологический стек
 
@@ -31,10 +33,11 @@ verification.db → Подготовка Dataset → Feature Extraction → Trai
 
 ### Этап 1: Подготовка данных
 
-- Читаем из `verification.db` записи со `status='completed'`
+- Читаем из `verification.db` записи со `status='completed'` и `is_hallucination=0`
 - Текст = `verified_text` (уже содержит исправленный или подтверждённый оригинал)
 - Аудио = `dataset/audio/{file}`
 - Фильтрация: пропускаем записи с `confidence='low'` (опционально)
+- Галлюцинации (`is_hallucination=1`) исключаются автоматически — у них нет полезного текста
 - Разбиение на train/eval (90%/10%)
 - Формат HuggingFace Dataset: `{"audio": {"array": [...], "sampling_rate": 16000}, "sentence": "текст"}`
 

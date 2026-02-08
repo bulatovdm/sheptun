@@ -54,10 +54,17 @@ Common Whisper errors to look for:
 5. Incorrect capitalization
 6. English terms incorrectly transliterated to Russian (e.g., "клауд" → "Claude")
 
+When the ENTIRE transcription is a hallucination — repetitive nonsense, foreign scripts
+(Hebrew, Korean, Japanese, Arabic mixed in), music/subtitle markers ("спокойная музыка",
+"[музыка]"), YouTube-style credits, or garbage text that does not represent real speech —
+set "is_hallucination" to true and "verified_text" to an empty string.
+Do NOT write reject tags, explanations, or anything else instead of JSON.
+
 IMPORTANT: Respond ONLY with valid JSON, no other text:
 {
-  "verified_text": "corrected text or original if correct",
+  "verified_text": "corrected text or original if correct, empty string if hallucination",
   "is_correct": true,
+  "is_hallucination": false,
   "confidence": "high",
   "notes": "brief explanation of changes, or empty string if correct"
 }"""
@@ -70,6 +77,7 @@ CREATE TABLE IF NOT EXISTS verifications (
     corrected_text TEXT,
     verified_text TEXT,
     is_correct INTEGER,
+    is_hallucination INTEGER DEFAULT 0,
     confidence TEXT,
     notes TEXT,
     model TEXT,
@@ -96,6 +104,7 @@ class VerificationResult:
     is_correct: bool
     confidence: str
     notes: str
+    is_hallucination: bool = False
 
 
 class VerificationDB:
@@ -111,7 +120,41 @@ class VerificationDB:
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_verifications_status ON verifications(status)"
         )
+        self._migrate_schema()
         self._conn.commit()
+
+    def _migrate_schema(self) -> None:
+        columns = {
+            row[1]
+            for row in self._conn.execute("PRAGMA table_info(verifications)").fetchall()
+        }
+        if "is_hallucination" not in columns:
+            self._conn.execute(
+                "ALTER TABLE verifications ADD COLUMN is_hallucination INTEGER DEFAULT 0"
+            )
+            self._reset_broken_records()
+
+    def _reset_broken_records(self) -> None:
+        self._conn.execute(
+            "UPDATE verifications SET status = 'pending', verified_text = NULL, "
+            "is_correct = NULL, confidence = NULL, notes = NULL, model = NULL, "
+            "error_message = NULL, completed_at = NULL "
+            "WHERE status = 'completed' AND ("
+            "  verified_text LIKE '%[REJECT%' OR "
+            "  length(verified_text) > 500 OR "
+            "  notes LIKE '%severely corrupted%' OR "
+            "  notes LIKE '%should be rejected%' OR "
+            "  notes LIKE '%unusable%' OR "
+            "  notes LIKE '%not salvageable%' OR "
+            "  notes LIKE '%cannot be reliably%' OR "
+            "  notes LIKE '%impossible to reliably%' OR "
+            "  notes LIKE '%impossible to correct%' OR "
+            "  notes LIKE '%should be re-recorded%' OR "
+            "  notes LIKE '%Recommend re-recording%' OR "
+            "  notes LIKE '%severe recognition failure%' OR "
+            "  notes LIKE '%extensive Whisper hallucinations%'"
+            ")"
+        )
 
     def close(self) -> None:
         self._conn.close()
@@ -152,11 +195,12 @@ class VerificationDB:
     def save_result(self, file: str, result: VerificationResult, model: str) -> None:
         self._conn.execute(
             "UPDATE verifications SET verified_text = ?, is_correct = ?, "
-            "confidence = ?, notes = ?, model = ?, status = 'completed', "
-            "completed_at = ? WHERE file = ?",
+            "is_hallucination = ?, confidence = ?, notes = ?, model = ?, "
+            "status = 'completed', completed_at = ? WHERE file = ?",
             (
                 result.verified_text,
                 1 if result.is_correct else 0,
+                1 if result.is_hallucination else 0,
                 result.confidence,
                 result.notes,
                 model,
@@ -185,8 +229,8 @@ class VerificationDB:
     def reset_all(self) -> int:
         cursor = self._conn.execute(
             "UPDATE verifications SET status = 'pending', verified_text = NULL, "
-            "is_correct = NULL, confidence = NULL, notes = NULL, model = NULL, "
-            "error_message = NULL, completed_at = NULL "
+            "is_correct = NULL, is_hallucination = NULL, confidence = NULL, "
+            "notes = NULL, model = NULL, error_message = NULL, completed_at = NULL "
             "WHERE status IN ('completed', 'error')"
         )
         self._conn.commit()
@@ -198,21 +242,34 @@ class VerificationDB:
         ).fetchall()
         stats: dict[str, int] = {row["status"]: row["cnt"] for row in rows}
         correct = self._conn.execute(
-            "SELECT COUNT(*) as cnt FROM verifications WHERE is_correct = 1"
+            "SELECT COUNT(*) as cnt FROM verifications "
+            "WHERE is_correct = 1 AND is_hallucination = 0"
         ).fetchone()
         fixed = self._conn.execute(
-            "SELECT COUNT(*) as cnt FROM verifications WHERE is_correct = 0 AND status = 'completed'"
+            "SELECT COUNT(*) as cnt FROM verifications "
+            "WHERE is_correct = 0 AND status = 'completed' AND is_hallucination = 0"
+        ).fetchone()
+        hallucinations = self._conn.execute(
+            "SELECT COUNT(*) as cnt FROM verifications WHERE is_hallucination = 1"
         ).fetchone()
         stats["correct"] = correct["cnt"] if correct else 0
         stats["fixed"] = fixed["cnt"] if fixed else 0
+        stats["hallucinations"] = hallucinations["cnt"] if hallucinations else 0
         stats["total"] = sum(v for k, v in stats.items() if k in ("pending", "completed", "error"))
         return stats
 
-    def export_jsonl(self, output_path: Path) -> int:
-        rows = self._conn.execute(
-            "SELECT file, original_text, verified_text, is_correct, confidence, notes, model "
-            "FROM verifications WHERE status = 'completed' ORDER BY file"
-        ).fetchall()
+    def export_jsonl(
+        self, output_path: Path, *, exclude_hallucinations: bool = True
+    ) -> int:
+        query = (
+            "SELECT file, original_text, verified_text, is_correct, "
+            "is_hallucination, confidence, notes, model "
+            "FROM verifications WHERE status = 'completed'"
+        )
+        if exclude_hallucinations:
+            query += " AND is_hallucination = 0"
+        query += " ORDER BY file"
+        rows = self._conn.execute(query).fetchall()
         with output_path.open("w", encoding="utf-8") as f:
             for row in rows:
                 entry: dict[str, str | bool] = {
@@ -220,6 +277,7 @@ class VerificationDB:
                     "original_text": row["original_text"],
                     "verified_text": row["verified_text"],
                     "is_correct": bool(row["is_correct"]),
+                    "is_hallucination": bool(row["is_hallucination"]),
                     "confidence": row["confidence"],
                     "notes": row["notes"],
                     "model": row["model"],
@@ -300,11 +358,13 @@ class ClaudeVerifier:
             cleaned = match.group(0)
 
         data = json.loads(cleaned)
+        is_hallucination = bool(data.get("is_hallucination", False))
         return VerificationResult(
-            verified_text=data["verified_text"],
+            verified_text="" if is_hallucination else data["verified_text"],
             is_correct=bool(data["is_correct"]),
             confidence=data.get("confidence", "medium"),
             notes=data.get("notes", ""),
+            is_hallucination=is_hallucination,
         )
 
 
@@ -353,9 +413,16 @@ async def run_verification(
                 db.save_result(record.file, result, model_used)
                 completed_count += 1
 
-                status = "[green]OK[/green]" if result.is_correct else "[yellow]FIXED[/yellow]"
+                if result.is_hallucination:
+                    status = "[red]HALLUCINATION[/red]"
+                elif result.is_correct:
+                    status = "[green]OK[/green]"
+                else:
+                    status = "[yellow]FIXED[/yellow]"
                 console.print(f"[{completed_count}/{total}] {status} {record.file}")
-                if not result.is_correct:
+                if result.is_hallucination:
+                    console.print(f"  [dim]{record.text[:100]}[/dim]")
+                elif not result.is_correct:
                     console.print(f"  [dim]{record.text}[/dim]")
                     console.print(f"  [cyan]{result.verified_text}[/cyan]")
                     if result.notes:
@@ -382,6 +449,7 @@ async def run_verification(
         console.print(
             f"[bold]Готово:[/bold] {stats.get('completed', 0)} обработано, "
             f"{stats.get('correct', 0)} верных, {stats.get('fixed', 0)} исправлено, "
+            f"{stats.get('hallucinations', 0)} галлюцинаций, "
             f"{stats.get('error', 0)} ошибок"
         )
     finally:

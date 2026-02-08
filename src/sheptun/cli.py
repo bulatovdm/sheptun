@@ -564,6 +564,7 @@ def verify_status(
     console.print(f"  Обработано: [green]{stats.get('completed', 0)}[/green]")
     console.print(f"    Верных: {stats.get('correct', 0)}")
     console.print(f"    Исправлено: {stats.get('fixed', 0)}")
+    console.print(f"    Галлюцинаций: [red]{stats.get('hallucinations', 0)}[/red]")
     console.print(f"  Ошибок: [red]{stats.get('error', 0)}[/red]")
 
 
@@ -585,6 +586,13 @@ def verify_export(
             help="Путь к датасету",
         ),
     ] = None,
+    include_hallucinations: Annotated[
+        bool,
+        typer.Option(
+            "--include-hallucinations",
+            help="Включить галлюцинации в экспорт",
+        ),
+    ] = False,
 ) -> None:
     """Экспортировать верифицированные транскрипции в JSONL."""
     from sheptun.verification import VerificationDB
@@ -600,7 +608,9 @@ def verify_export(
 
     db = VerificationDB(db_path)
     try:
-        count = db.export_jsonl(output_path)
+        count = db.export_jsonl(
+            output_path, exclude_hallucinations=not include_hallucinations
+        )
     finally:
         db.close()
 

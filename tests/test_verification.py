@@ -44,6 +44,17 @@ def sample_result() -> VerificationResult:
     )
 
 
+@pytest.fixture
+def hallucination_result() -> VerificationResult:
+    return VerificationResult(
+        verified_text="",
+        is_correct=False,
+        confidence="high",
+        notes="repetitive nonsense",
+        is_hallucination=True,
+    )
+
+
 class TestVerificationDB:
     def test_insert_pending(
         self, db: VerificationDB, sample_records: list[TranscriptRecord]
@@ -225,6 +236,146 @@ class TestVerificationDB:
         assert data["verified_text"] == "привет мир"
         assert data["is_correct"] is True
 
+    def test_save_hallucination(
+        self,
+        db: VerificationDB,
+        sample_records: list[TranscriptRecord],
+        hallucination_result: VerificationResult,
+    ) -> None:
+        db.insert_pending(sample_records)
+
+        db.save_result("test1.wav", hallucination_result, "claude-haiku-4.5")
+
+        stats = db.get_stats()
+        assert stats["hallucinations"] == 1
+        assert stats["correct"] == 0
+        assert stats["fixed"] == 0
+
+    def test_hallucinations_not_in_correct_or_fixed(
+        self,
+        db: VerificationDB,
+        sample_records: list[TranscriptRecord],
+        hallucination_result: VerificationResult,
+    ) -> None:
+        db.insert_pending(sample_records)
+        db.save_result("test1.wav", hallucination_result, "claude-haiku-4.5")
+
+        stats = db.get_stats()
+
+        assert stats["hallucinations"] == 1
+        assert stats["correct"] == 0
+        assert stats["fixed"] == 0
+        assert stats["completed"] == 1
+
+    def test_export_excludes_hallucinations_by_default(
+        self,
+        db: VerificationDB,
+        sample_records: list[TranscriptRecord],
+        sample_result: VerificationResult,
+        hallucination_result: VerificationResult,
+        tmp_path: Path,
+    ) -> None:
+        db.insert_pending(sample_records)
+        db.save_result("test1.wav", sample_result, "claude-haiku-4.5")
+        db.save_result("test2.wav", hallucination_result, "claude-haiku-4.5")
+
+        output = tmp_path / "export.jsonl"
+        count = db.export_jsonl(output)
+
+        assert count == 1
+
+    def test_export_includes_hallucinations_when_requested(
+        self,
+        db: VerificationDB,
+        sample_records: list[TranscriptRecord],
+        sample_result: VerificationResult,
+        hallucination_result: VerificationResult,
+        tmp_path: Path,
+    ) -> None:
+        db.insert_pending(sample_records)
+        db.save_result("test1.wav", sample_result, "claude-haiku-4.5")
+        db.save_result("test2.wav", hallucination_result, "claude-haiku-4.5")
+
+        output = tmp_path / "export.jsonl"
+        count = db.export_jsonl(output, exclude_hallucinations=False)
+
+        assert count == 2
+
+    def test_schema_migration_adds_hallucination_column(self, tmp_path: Path) -> None:
+        import sqlite3
+
+        db_path = tmp_path / "old.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "CREATE TABLE verifications ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "file TEXT NOT NULL UNIQUE, "
+            "original_text TEXT NOT NULL, "
+            "corrected_text TEXT, "
+            "verified_text TEXT, "
+            "is_correct INTEGER, "
+            "confidence TEXT, "
+            "notes TEXT, "
+            "model TEXT, "
+            "status TEXT NOT NULL DEFAULT 'pending', "
+            "error_message TEXT, "
+            "created_at TEXT NOT NULL, "
+            "completed_at TEXT)"
+        )
+        conn.commit()
+        conn.close()
+
+        db = VerificationDB(db_path)
+        db.close()
+
+        check = sqlite3.connect(str(db_path))
+        columns = {row[1] for row in check.execute("PRAGMA table_info(verifications)").fetchall()}
+        check.close()
+        assert "is_hallucination" in columns
+
+    def test_migration_resets_broken_records(self, tmp_path: Path) -> None:
+        import sqlite3
+
+        db_path = tmp_path / "old.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "CREATE TABLE verifications ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "file TEXT NOT NULL UNIQUE, "
+            "original_text TEXT NOT NULL, "
+            "corrected_text TEXT, "
+            "verified_text TEXT, "
+            "is_correct INTEGER, "
+            "confidence TEXT, "
+            "notes TEXT, "
+            "model TEXT, "
+            "status TEXT NOT NULL DEFAULT 'pending', "
+            "error_message TEXT, "
+            "created_at TEXT NOT NULL, "
+            "completed_at TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO verifications (file, original_text, verified_text, is_correct, "
+            "notes, status, created_at) VALUES "
+            "('broken.wav', 'мусор', '[REJECT - INVALID]', 0, "
+            "'should be rejected', 'completed', '2025-01-01')"
+        )
+        conn.execute(
+            "INSERT INTO verifications (file, original_text, verified_text, is_correct, "
+            "notes, status, created_at) VALUES "
+            "('good.wav', 'привет', 'привет', 1, '', 'completed', '2025-01-01')"
+        )
+        conn.commit()
+        conn.close()
+
+        db = VerificationDB(db_path)
+        try:
+            pending = db.get_pending()
+            assert len(pending) == 1
+            assert pending[0].file == "broken.wav"
+        finally:
+            db.close()
+
 
 class TestLoadTranscripts:
     def test_load_basic(self, tmp_path: Path) -> None:
@@ -351,6 +502,55 @@ class TestClaudeVerifier:
         result = verifier.parse_response(response)
 
         assert result.verified_text == "тест"
+
+    def test_parse_response_hallucination(self) -> None:
+        verifier = ClaudeVerifier()
+        response = json.dumps(
+            {
+                "verified_text": "",
+                "is_correct": False,
+                "is_hallucination": True,
+                "confidence": "high",
+                "notes": "repetitive nonsense text",
+            }
+        )
+
+        result = verifier.parse_response(response)
+
+        assert result.is_hallucination is True
+        assert result.verified_text == ""
+
+    def test_parse_response_hallucination_forces_empty_text(self) -> None:
+        verifier = ClaudeVerifier()
+        response = json.dumps(
+            {
+                "verified_text": "some garbage",
+                "is_correct": False,
+                "is_hallucination": True,
+                "confidence": "high",
+                "notes": "hallucinated text",
+            }
+        )
+
+        result = verifier.parse_response(response)
+
+        assert result.is_hallucination is True
+        assert result.verified_text == ""
+
+    def test_parse_response_non_hallucination_default(self) -> None:
+        verifier = ClaudeVerifier()
+        response = json.dumps(
+            {
+                "verified_text": "привет",
+                "is_correct": True,
+                "confidence": "high",
+                "notes": "",
+            }
+        )
+
+        result = verifier.parse_response(response)
+
+        assert result.is_hallucination is False
 
     def test_parse_response_invalid_json_raises(self) -> None:
         verifier = ClaudeVerifier()
