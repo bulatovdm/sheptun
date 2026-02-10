@@ -5,6 +5,7 @@ MESSAGES = {
     "menu_restart": "Перезапустить",
     "menu_quit": "Выход",
     "notification_loading": "Загрузка модели...",
+    "notification_downloading": "Скачивание модели...",
     "notification_error": "Ошибка",
     "help_commands": "энтер, таб, эскейп, пробел, вверх, вниз, влево, вправо, удали, клир, стоп",
     "help_title": "Sheptun - Команды",

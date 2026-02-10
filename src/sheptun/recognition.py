@@ -1,6 +1,7 @@
 import logging
 import re
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -219,9 +220,11 @@ class WhisperRecognizer(_WarmupMixin):
 
         original_text = result.get("text", "").strip()
         if not original_text:
+            logger.debug("Whisper returned empty text")
             return None
 
         if _check_hallucination(original_text, self._hallucinations):
+            logger.debug(f"Hallucination filtered: '{original_text}'")
             return None
 
         corrected_text = _apply_spell_correction(original_text)
@@ -345,6 +348,28 @@ def resolve_mlx_model(model_name: str) -> str:
     return MLX_MODELS.get(model_name, model_name)
 
 
+def _get_model_expected_size(repo_id: str) -> int | None:
+    try:
+        from huggingface_hub import HfApi
+        from huggingface_hub.hf_api import RepoFile
+
+        api = HfApi()
+        files = api.list_repo_tree(repo_id)
+        return sum(f.size for f in files if isinstance(f, RepoFile) and f.size)
+    except Exception:
+        pass
+    return None
+
+
+def _get_cache_dir_size(repo_id: str) -> int:
+    cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
+    folder_name = f"models--{repo_id.replace('/', '--')}"
+    model_dir = cache_dir / folder_name
+    if not model_dir.exists():
+        return 0
+    return sum(f.stat().st_size for f in model_dir.rglob("*") if f.is_file())
+
+
 class MLXWhisperRecognizer(_WarmupMixin):
     def __init__(
         self,
@@ -360,6 +385,59 @@ class MLXWhisperRecognizer(_WarmupMixin):
     @property
     def model_name(self) -> str:
         return self._model_name
+
+    def is_model_cached(self) -> bool:
+        try:
+            from huggingface_hub import try_to_load_from_cache
+
+            result = try_to_load_from_cache(self._model_repo, "config.json")
+            return isinstance(result, str)
+        except Exception:
+            return False
+
+    def download_model(
+        self, on_progress: Callable[[int], None] | None = None
+    ) -> None:
+        import time
+
+        from huggingface_hub import snapshot_download  # pyright: ignore[reportUnknownVariableType]
+
+        logger.info(f"Downloading MLX model: {self._model_repo}")
+
+        if on_progress is None:
+            snapshot_download(repo_id=self._model_repo)  # pyright: ignore[reportUnknownMemberType]
+            logger.info(f"Model downloaded: {self._model_repo}")
+            return
+
+        expected_size = _get_model_expected_size(self._model_repo)
+        error: BaseException | None = None
+
+        def _download() -> None:
+            nonlocal error
+            try:
+                snapshot_download(repo_id=self._model_repo)  # pyright: ignore[reportUnknownMemberType]
+            except BaseException as e:
+                error = e
+
+        download_thread = threading.Thread(target=_download, daemon=True)
+        download_thread.start()
+
+        last_pct = -1
+        while download_thread.is_alive():
+            if expected_size and expected_size > 0:
+                current_size = _get_cache_dir_size(self._model_repo)
+                pct = min(99, int(current_size * 100 / expected_size))
+                if pct != last_pct:
+                    last_pct = pct
+                    on_progress(pct)
+            time.sleep(0.5)
+
+        download_thread.join()
+        if error is not None:
+            raise error
+
+        on_progress(100)
+        logger.info(f"Model downloaded: {self._model_repo}")
 
     def _do_warmup(self) -> None:
         import mlx_whisper  # type: ignore[import-untyped]
@@ -378,6 +456,9 @@ class MLXWhisperRecognizer(_WarmupMixin):
         if audio_array is None:
             return None
 
+        duration = len(audio_array) / 16000
+        logger.debug(f"MLX input: {duration:.2f}s audio ({len(audio_data)} bytes raw)")
+
         result: dict[str, Any] = mlx_whisper.transcribe(  # pyright: ignore[reportUnknownMemberType]
             audio_array,
             path_or_hf_repo=self._model_repo,
@@ -388,9 +469,11 @@ class MLXWhisperRecognizer(_WarmupMixin):
 
         original_text = result.get("text", "").strip()
         if not original_text:
+            logger.debug("MLX Whisper returned empty text")
             return None
 
         if _check_hallucination(original_text, self._hallucinations):
+            logger.debug(f"Hallucination filtered: '{original_text}'")
             return None
 
         corrected_text = _apply_spell_correction(original_text)

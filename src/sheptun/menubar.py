@@ -231,6 +231,15 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
             from sheptun.recognition import MLXWhisperRecognizer
 
             recognizer = MLXWhisperRecognizer(model_name=self._model_name)
+            if not recognizer.is_model_cached():
+                logger.info("MLX model not cached, downloading...")
+                self.title = t("notification_downloading")
+                recognizer.download_model(
+                    on_progress=lambda pct: setattr(self, "title", f"{pct}%"),
+                )
+            self.title = t("notification_loading")
+            recognizer.warmup()
+            self.title = ""
         else:
             recognizer = WhisperRecognizer(model_name=self._model_name)
 

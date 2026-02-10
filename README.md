@@ -143,6 +143,8 @@ SHEPTUN_MODEL=turbo
 
 Модели: `tiny`, `base`, `small`, `medium`, `large`, `turbo`
 
+При первом запуске модель скачивается автоматически из HuggingFace (~1.6 ГБ для turbo). Прогресс скачивания отображается в menubar.
+
 ### Apple Speech Framework
 
 Нативная система распознавания macOS. Быстрее запускается, использует меньше памяти.
