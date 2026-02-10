@@ -30,9 +30,7 @@ class TestHallucinationFiltering:
         assert _check_hallucination("Привет мир", hallucinations) is False
         assert _check_hallucination("клод", hallucinations) is False
 
-    def test_is_hallucination_partial_match_not_filtered(
-        self, hallucinations: set[str]
-    ) -> None:
+    def test_is_hallucination_partial_match_not_filtered(self, hallucinations: set[str]) -> None:
         assert _check_hallucination("Продолжение", hallucinations) is False
         assert _check_hallucination("Спасибо", hallucinations) is False
 

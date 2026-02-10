@@ -52,9 +52,7 @@ class MockRecognizer:
     def __init__(self, result: RecognitionResult | None = None) -> None:
         self._result = result
 
-    def recognize(
-        self, _audio_data: bytes, _sample_rate: int
-    ) -> RecognitionResult | None:
+    def recognize(self, _audio_data: bytes, _sample_rate: int) -> RecognitionResult | None:
         return self._result
 
     def start_warmup(self) -> None:
@@ -147,9 +145,7 @@ class TestBaseVoiceEngine:
             assert not engine.is_running()
             assert status.idle_called
 
-    def test_execute_text_action_first_in_session(
-        self, command_parser: CommandParser
-    ) -> None:
+    def test_execute_text_action_first_in_session(self, command_parser: CommandParser) -> None:
         status = MockStatusIndicator()
         recognizer = MockRecognizer()
         keyboard = MockKeyboardSender()
@@ -165,9 +161,7 @@ class TestBaseVoiceEngine:
             engine._execute_action(action)
             assert "hello" in keyboard.sent_text
 
-    def test_execute_text_action_subsequent_adds_space(
-        self, command_parser: CommandParser
-    ) -> None:
+    def test_execute_text_action_subsequent_adds_space(self, command_parser: CommandParser) -> None:
         status = MockStatusIndicator()
         recognizer = MockRecognizer()
         keyboard = MockKeyboardSender()

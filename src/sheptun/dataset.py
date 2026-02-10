@@ -25,9 +25,7 @@ class DatasetRecorder:
     def _generate_filename(self) -> str:
         return datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-    def save(
-        self, audio: np.ndarray, text: str, corrected_text: str | None = None
-    ) -> Path:
+    def save(self, audio: np.ndarray, text: str, corrected_text: str | None = None) -> Path:
         filename = self._generate_filename()
         audio_path = self.audio_dir / f"{filename}.wav"
 

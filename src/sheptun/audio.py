@@ -309,7 +309,11 @@ class ContinuousAudioRecorder:
                 self._last_speech_time = current_time
                 self._speech_started_notified = False
             elif self._should_reset_idle(current_time) or self._is_buffer_too_large():
-                buffer_duration = len(self._buffer) * self._audio_config.blocksize / self._audio_config.sample_rate
+                buffer_duration = (
+                    len(self._buffer)
+                    * self._audio_config.blocksize
+                    / self._audio_config.sample_rate
+                )
                 if buffer_duration > 0.5:
                     logger.debug(f"Buffer reset: {buffer_duration:.1f}s of buffered audio")
                 self._buffer.clear()
@@ -330,5 +334,7 @@ class ContinuousAudioRecorder:
         return idle_duration >= self._vad_config.idle_timeout
 
     def _is_buffer_too_large(self) -> bool:
-        buffer_duration = len(self._buffer) * self._audio_config.blocksize / self._audio_config.sample_rate
+        buffer_duration = (
+            len(self._buffer) * self._audio_config.blocksize / self._audio_config.sample_rate
+        )
         return buffer_duration > self._vad_config.max_speech_duration * 2

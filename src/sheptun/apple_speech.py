@@ -105,8 +105,10 @@ class AppleSpeechRecognizer:
             if self._on_device:
                 request.setRequiresOnDeviceRecognition_(True)
 
-            audio_format = AVAudioFormat.alloc().initWithCommonFormat_sampleRate_channels_interleaved_(
-                1, 16000.0, 1, False
+            audio_format = (
+                AVAudioFormat.alloc().initWithCommonFormat_sampleRate_channels_interleaved_(
+                    1, 16000.0, 1, False
+                )
             )
 
             frame_capacity = len(audio_array)
@@ -174,7 +176,7 @@ class AppleSpeechRecognizer:
         duration = len(audio) / orig_sr
         target_length = int(duration * target_sr)
         indices = np.linspace(0, len(audio) - 1, target_length)
-        resampled: np.ndarray[Any, Any] = np.interp(
-            indices, np.arange(len(audio)), audio
-        ).astype(np.float32)
+        resampled: np.ndarray[Any, Any] = np.interp(indices, np.arange(len(audio)), audio).astype(
+            np.float32
+        )
         return resampled

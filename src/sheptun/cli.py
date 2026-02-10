@@ -56,7 +56,7 @@ def listen(
         typer.Option(
             "--model",
             "-m",
-            help="Модель Whisper (tiny, base, small, medium, large)",
+            help="Модель Whisper (tiny, base, small, medium, large, turbo)",
         ),
     ] = None,
     device: Annotated[
@@ -217,7 +217,7 @@ def menubar(
         typer.Option(
             "--model",
             "-m",
-            help="Модель Whisper (tiny, base, small, medium, large)",
+            help="Модель Whisper (tiny, base, small, medium, large, turbo)",
         ),
     ] = None,
 ) -> None:

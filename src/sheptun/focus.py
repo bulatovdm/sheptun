@@ -50,9 +50,7 @@ class FocusTracker:
             )
 
             app_ref = AXUIElementCreateApplication(pid)
-            err, window = AXUIElementCopyAttributeValue(
-                app_ref, "AXFocusedWindow", None
-            )
+            err, window = AXUIElementCopyAttributeValue(app_ref, "AXFocusedWindow", None)
             if err != 0 or window is None:
                 return None
 

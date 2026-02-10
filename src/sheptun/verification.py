@@ -125,8 +125,7 @@ class VerificationDB:
 
     def _migrate_schema(self) -> None:
         columns = {
-            row[1]
-            for row in self._conn.execute("PRAGMA table_info(verifications)").fetchall()
+            row[1] for row in self._conn.execute("PRAGMA table_info(verifications)").fetchall()
         }
         if "is_hallucination" not in columns:
             self._conn.execute(
@@ -258,9 +257,7 @@ class VerificationDB:
         stats["total"] = sum(v for k, v in stats.items() if k in ("pending", "completed", "error"))
         return stats
 
-    def export_jsonl(
-        self, output_path: Path, *, exclude_hallucinations: bool = True
-    ) -> int:
+    def export_jsonl(self, output_path: Path, *, exclude_hallucinations: bool = True) -> int:
         query = (
             "SELECT file, original_text, verified_text, is_correct, "
             "is_hallucination, confidence, notes, model "

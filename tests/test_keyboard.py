@@ -39,7 +39,7 @@ class TestKeyCodes:
             assert isinstance(keycode.needs_shift, bool)
 
     def test_shifted_keys_have_needs_shift(self) -> None:
-        shifted_chars = "!@#$%^&*()_+{}|:\"<>?~"
+        shifted_chars = '!@#$%^&*()_+{}|:"<>?~'
         for char in shifted_chars:
             if char in KEY_CODES:
                 assert KEY_CODES[char].needs_shift, f"Key '{char}' should need shift"

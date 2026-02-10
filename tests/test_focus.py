@@ -87,9 +87,7 @@ class TestFocusAwareTextBuffer:
             app_bundle_id="com.example.app", window_title="Window"
         )
 
-        buffer = FocusAwareTextBuffer(
-            send_text_callback=callback, focus_tracker=tracker
-        )
+        buffer = FocusAwareTextBuffer(send_text_callback=callback, focus_tracker=tracker)
         buffer.send_text("hello")
         callback.assert_called_once_with("hello")
 
@@ -100,9 +98,7 @@ class TestFocusAwareTextBuffer:
             app_bundle_id="com.other.app", window_title="Different Window"
         )
 
-        buffer = FocusAwareTextBuffer(
-            send_text_callback=callback, focus_tracker=tracker
-        )
+        buffer = FocusAwareTextBuffer(send_text_callback=callback, focus_tracker=tracker)
         buffer.start_capture()
         buffer.send_text("hello")
         callback.assert_called_once_with("hello")

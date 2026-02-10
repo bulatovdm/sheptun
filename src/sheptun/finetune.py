@@ -17,6 +17,7 @@ WHISPER_MODELS: dict[str, str] = {
     "small": "openai/whisper-small",
     "medium": "openai/whisper-medium",
     "large": "openai/whisper-large-v3",
+    "turbo": "openai/whisper-large-v3-turbo",
 }
 
 CONFIDENCE_LEVELS: dict[str, int] = {"low": 0, "medium": 1, "high": 2}

@@ -196,7 +196,9 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
             self._set_state(AppState.IDLE)
             self.icon = self._icon_idle
             self._end_ptt_capture()
-            self._engine.set_keyboard_sender(MacOSKeyboardSender(use_clipboard=settings.use_clipboard))
+            self._engine.set_keyboard_sender(
+                MacOSKeyboardSender(use_clipboard=settings.use_clipboard)
+            )
 
     def _end_ptt_capture(self) -> None:
         if self._ptt_keyboard is not None:
@@ -223,6 +225,7 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         recognizer: SpeechRecognizer
         if settings.recognizer == "apple":
             from sheptun.apple_speech import AppleSpeechRecognizer
+
             recognizer = AppleSpeechRecognizer()
         else:
             recognizer = WhisperRecognizer(model_name=self._model_name)
@@ -325,4 +328,4 @@ def run_menubar(model_name: str = "base") -> None:
 
 
 if __name__ == "__main__":
-    run_menubar()
+    run_menubar(model_name=settings.model)

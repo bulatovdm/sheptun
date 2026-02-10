@@ -71,9 +71,7 @@ class TestVerificationDB:
 
         assert inserted == 0
 
-    def test_get_pending(
-        self, db: VerificationDB, sample_records: list[TranscriptRecord]
-    ) -> None:
+    def test_get_pending(self, db: VerificationDB, sample_records: list[TranscriptRecord]) -> None:
         db.insert_pending(sample_records)
 
         pending = db.get_pending()
@@ -133,9 +131,7 @@ class TestVerificationDB:
         assert stats["completed"] == 1
         assert stats["fixed"] == 1
 
-    def test_save_error(
-        self, db: VerificationDB, sample_records: list[TranscriptRecord]
-    ) -> None:
+    def test_save_error(self, db: VerificationDB, sample_records: list[TranscriptRecord]) -> None:
         db.insert_pending(sample_records)
 
         db.save_error("test1.wav", "API error")
@@ -162,9 +158,7 @@ class TestVerificationDB:
         assert stats["correct"] == 1
         assert stats["fixed"] == 0
 
-    def test_reset_errors(
-        self, db: VerificationDB, sample_records: list[TranscriptRecord]
-    ) -> None:
+    def test_reset_errors(self, db: VerificationDB, sample_records: list[TranscriptRecord]) -> None:
         db.insert_pending(sample_records)
         db.save_error("test1.wav", "API error")
         db.save_error("test2.wav", "timeout")
@@ -409,8 +403,7 @@ class TestLoadTranscripts:
     def test_load_skips_empty_lines(self, tmp_path: Path) -> None:
         jsonl = tmp_path / "transcripts.jsonl"
         jsonl.write_text(
-            json.dumps({"file": "a.wav", "text": "тест", "timestamp": "2025-01-01"})
-            + "\n\n\n"
+            json.dumps({"file": "a.wav", "text": "тест", "timestamp": "2025-01-01"}) + "\n\n\n"
         )
 
         records = load_transcripts(jsonl)
@@ -429,9 +422,7 @@ class TestClaudeVerifier:
 
     def test_build_prompt_with_corrected(self) -> None:
         verifier = ClaudeVerifier()
-        record = TranscriptRecord(
-            file="test.wav", text="привет", timestamp="", corrected="Привет"
-        )
+        record = TranscriptRecord(file="test.wav", text="привет", timestamp="", corrected="Привет")
 
         prompt = verifier.build_prompt(record)
 
@@ -482,9 +473,9 @@ class TestClaudeVerifier:
     def test_parse_response_json_with_surrounding_text(self) -> None:
         verifier = ClaudeVerifier()
         response = (
-            'Here is my analysis:\n'
+            "Here is my analysis:\n"
             '{"verified_text": "тест", "is_correct": true, "confidence": "high", "notes": ""}\n'
-            'Hope this helps!'
+            "Hope this helps!"
         )
 
         result = verifier.parse_response(response)

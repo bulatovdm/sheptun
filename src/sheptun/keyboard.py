@@ -147,6 +147,7 @@ MODIFIER_FLAGS: dict[str, int] = {
 class MacOSKeyboardSender:
     def __init__(self, key_delay: float | None = None, use_clipboard: bool = False) -> None:
         from sheptun.settings import settings
+
         self._key_delay = key_delay if key_delay is not None else settings.key_delay
         self._use_clipboard = use_clipboard
         self._pasteboard = NSPasteboard.generalPasteboard()
