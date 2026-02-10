@@ -1,4 +1,5 @@
 import logging
+import queue
 import threading
 import time
 from collections.abc import Callable
@@ -112,12 +113,12 @@ class EnergyVAD:
         self.config = config
         self._silence_samples = 0
         self._speech_samples = 0
-        self._is_speaking = False
+        self.is_speaking = False
 
     def reset(self) -> None:
         self._silence_samples = 0
         self._speech_samples = 0
-        self._is_speaking = False
+        self.is_speaking = False
 
     def process_chunk(self, audio_chunk: bytes, sample_rate: int) -> bool:
         audio_array = np.frombuffer(audio_chunk, dtype=np.int16).astype(np.float32) / 32768.0
@@ -126,7 +127,7 @@ class EnergyVAD:
         if energy > self.config.energy_threshold:
             self._speech_samples += len(audio_array)
             self._silence_samples = 0
-            self._is_speaking = True
+            self.is_speaking = True
         else:
             self._silence_samples += len(audio_array)
 
@@ -136,7 +137,7 @@ class EnergyVAD:
         if speech_duration >= self.config.max_speech_duration:
             return True
 
-        if not self._is_speaking:
+        if not self.is_speaking:
             return False
 
         if silence_duration >= self.config.silence_duration:
@@ -155,13 +156,13 @@ class SileroVAD:
         self._model = load_silero_vad()  # type: ignore[no-untyped-call]
         self._silence_samples = 0
         self._speech_samples = 0
-        self._is_speaking = False
+        self.is_speaking = False
 
     def reset(self) -> None:
         self._model.reset_states()  # type: ignore[union-attr]
         self._silence_samples = 0
         self._speech_samples = 0
-        self._is_speaking = False
+        self.is_speaking = False
 
     def process_chunk(self, audio_chunk: bytes, sample_rate: int) -> bool:
         import torch  # type: ignore[import-untyped]
@@ -174,7 +175,7 @@ class SileroVAD:
         if speech_prob > 0.5:
             self._speech_samples += len(audio_array)
             self._silence_samples = 0
-            self._is_speaking = True
+            self.is_speaking = True
         else:
             self._silence_samples += len(audio_array)
 
@@ -184,7 +185,7 @@ class SileroVAD:
         if speech_duration >= self.config.max_speech_duration:
             return True
 
-        if not self._is_speaking:
+        if not self.is_speaking:
             return False
 
         if silence_duration >= self.config.silence_duration:
@@ -233,6 +234,8 @@ class ContinuousAudioRecorder:
         self._on_speech_complete: Callable[[bytes], None] | None = None
         self._last_speech_time: float = 0.0
         self._speech_started_notified: bool = False
+        self._callback_queue: queue.Queue[tuple[str, bytes | None]] = queue.Queue()
+        self._callback_thread: threading.Thread | None = None
 
     @property
     def sample_rate(self) -> int:
@@ -256,6 +259,9 @@ class ContinuousAudioRecorder:
         with self._lock:
             self._buffer.clear()
 
+        self._callback_thread = threading.Thread(target=self._process_callbacks, daemon=True)
+        self._callback_thread.start()
+
         self._stream = sd.InputStream(
             samplerate=self._audio_config.sample_rate,
             channels=self._audio_config.channels,
@@ -272,6 +278,11 @@ class ContinuousAudioRecorder:
             self._stream.stop()
             self._stream.close()
             self._stream = None
+
+        self._callback_queue.put(("stop", None))
+        if self._callback_thread is not None:
+            self._callback_thread.join(timeout=5.0)
+            self._callback_thread = None
 
     def is_running(self) -> bool:
         return self._running
@@ -293,10 +304,10 @@ class ContinuousAudioRecorder:
 
         with self._lock:
             self._buffer.append(chunk)
-            was_speaking = self._vad._is_speaking
+            was_speaking = self._vad.is_speaking
             speech_complete = self._vad.process_chunk(chunk, self._audio_config.sample_rate)
 
-            if self._vad._is_speaking:
+            if self._vad.is_speaking:
                 self._last_speech_time = current_time
                 if not was_speaking and not self._speech_started_notified:
                     notify_speech_start = True
@@ -321,14 +332,40 @@ class ContinuousAudioRecorder:
                 self._last_speech_time = current_time
                 self._speech_started_notified = False
 
-        if notify_speech_start and self._on_speech_start is not None:
-            self._on_speech_start()
+        if notify_speech_start:
+            self._callback_queue.put(("speech_start", None))
 
-        if audio_data is not None and self._on_speech_complete is not None:
-            self._on_speech_complete(audio_data)
+        if audio_data is not None:
+            self._callback_queue.put(("speech_complete", audio_data))
+
+    def _process_callbacks(self) -> None:
+        while True:
+            try:
+                event, data = self._callback_queue.get(timeout=1.0)
+            except queue.Empty:
+                if not self._running:
+                    break
+                continue
+
+            if event == "stop":
+                break
+            elif event == "speech_start" and self._on_speech_start is not None:
+                try:
+                    self._on_speech_start()
+                except Exception:
+                    logger.exception("Error in speech_start callback")
+            elif (
+                event == "speech_complete"
+                and data is not None
+                and self._on_speech_complete is not None
+            ):
+                try:
+                    self._on_speech_complete(data)
+                except Exception:
+                    logger.exception("Error in speech_complete callback")
 
     def _should_reset_idle(self, current_time: float) -> bool:
-        if self._vad._is_speaking:
+        if self._vad.is_speaking:
             return False
         idle_duration = current_time - self._last_speech_time
         return idle_duration >= self._vad_config.idle_timeout

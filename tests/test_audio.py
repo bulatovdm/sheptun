@@ -55,7 +55,7 @@ class TestEnergyVAD:
         config = VoiceActivityConfig()
         vad = EnergyVAD(config)
 
-        assert vad._is_speaking is False
+        assert vad.is_speaking is False
         assert vad._silence_samples == 0
         assert vad._speech_samples == 0
 
@@ -64,13 +64,13 @@ class TestEnergyVAD:
         vad = EnergyVAD(config)
 
         # Simulate some state
-        vad._is_speaking = True
+        vad.is_speaking = True
         vad._silence_samples = 100
         vad._speech_samples = 200
 
         vad.reset()
 
-        assert vad._is_speaking is False
+        assert vad.is_speaking is False
         assert vad._silence_samples == 0
         assert vad._speech_samples == 0
 
@@ -99,7 +99,7 @@ class TestEnergyVAD:
         # Process speech
         vad.process_chunk(loud_audio, 16000)
 
-        assert vad._is_speaking is True
+        assert vad.is_speaking is True
 
     def test_speech_ends_after_silence(self) -> None:
         config = VoiceActivityConfig(

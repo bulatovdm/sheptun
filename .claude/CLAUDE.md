@@ -74,6 +74,11 @@ SHEPTUN_DEBUG=false
 
 Command config: `./sheptun.yaml` or `~/.config/sheptun/commands.yaml`
 
+## Debugging
+
+- App logs: `~/Library/Logs/Sheptun/sheptun.log`
+- Crash reports: `~/Library/Logs/DiagnosticReports/Python-*.ips` (look for `com.sheptun.menubar`)
+
 ## Key Patterns
 
 - Protocols in `types.py` for dependency injection
