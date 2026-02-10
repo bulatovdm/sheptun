@@ -292,6 +292,12 @@ class VoiceEngine(BaseVoiceEngine):
             logger.info("Using Apple Speech Framework for recognition")
             return AppleSpeechRecognizer()
 
+        if settings.recognizer == "mlx":
+            from sheptun.recognition import MLXWhisperRecognizer
+
+            logger.info(f"Using MLX Whisper ({model_name}) for recognition")
+            return MLXWhisperRecognizer(model_name=model_name)
+
         from sheptun.recognition import is_local_model
 
         if is_local_model(model_name):

@@ -1,11 +1,16 @@
 # pyright: reportPrivateUsage=false
+from typing import Any
+
 import pytest
 
 from sheptun.recognition import (
     _FOREIGN_SCRIPT_PATTERN,
     _REPETITIVE_PATTERN,
     _SOUND_DESCRIPTION_PATTERN,
+    MLX_MODELS,
+    _calculate_confidence,
     _check_hallucination,
+    resolve_mlx_model,
 )
 
 
@@ -133,3 +138,50 @@ class TestForeignScriptPattern:
     )
     def test_does_not_match_cyrillic_latin(self, text: str) -> None:
         assert not _FOREIGN_SCRIPT_PATTERN.search(text)
+
+
+class TestCalculateConfidence:
+    def test_empty_segments(self) -> None:
+        assert _calculate_confidence([]) == 0.0
+
+    def test_single_segment(self) -> None:
+        segments: list[dict[str, Any]] = [
+            {"avg_logprob": -0.5, "no_speech_prob": 0.1, "tokens": [1, 2, 3]},
+        ]
+        confidence = _calculate_confidence(segments)
+        assert 0.0 < confidence < 1.0
+
+    def test_skips_no_speech_segments(self) -> None:
+        segments: list[dict[str, Any]] = [
+            {"avg_logprob": -0.5, "no_speech_prob": 0.9, "tokens": [1, 2]},
+        ]
+        assert _calculate_confidence(segments) == 0.0
+
+    def test_multiple_segments(self) -> None:
+        segments: list[dict[str, Any]] = [
+            {"avg_logprob": -0.3, "no_speech_prob": 0.1, "tokens": [1, 2]},
+            {"avg_logprob": -0.5, "no_speech_prob": 0.2, "tokens": [3, 4, 5]},
+        ]
+        confidence = _calculate_confidence(segments)
+        assert 0.0 < confidence < 1.0
+
+
+class TestMLXModels:
+    def test_all_standard_models_present(self) -> None:
+        for name in ("tiny", "base", "small", "medium", "large", "turbo"):
+            assert name in MLX_MODELS
+
+    def test_models_point_to_mlx_community(self) -> None:
+        for repo in MLX_MODELS.values():
+            assert repo.startswith("mlx-community/whisper-")
+
+    def test_resolve_mlx_model_known(self) -> None:
+        assert resolve_mlx_model("turbo") == "mlx-community/whisper-large-v3-turbo"
+        assert resolve_mlx_model("base") == "mlx-community/whisper-base"
+
+    def test_resolve_mlx_model_passthrough(self) -> None:
+        custom = "mlx-community/whisper-custom"
+        assert resolve_mlx_model(custom) == custom
+
+    def test_resolve_mlx_model_unknown_passthrough(self) -> None:
+        assert resolve_mlx_model("unknown-model") == "unknown-model"

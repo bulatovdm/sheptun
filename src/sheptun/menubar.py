@@ -227,6 +227,10 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
             from sheptun.apple_speech import AppleSpeechRecognizer
 
             recognizer = AppleSpeechRecognizer()
+        elif settings.recognizer == "mlx":
+            from sheptun.recognition import MLXWhisperRecognizer
+
+            recognizer = MLXWhisperRecognizer(model_name=self._model_name)
         else:
             recognizer = WhisperRecognizer(model_name=self._model_name)
 

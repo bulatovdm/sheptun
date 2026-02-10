@@ -346,28 +346,56 @@ def cleanup_models(
         _success(f"Удалено {deleted_count} моделей ({total_size_mb:.0f} MB)")
 
 
+def _get_mlx_cache_dir() -> Path:
+    return Path.home() / ".cache" / "huggingface" / "hub"
+
+
+def _list_mlx_models() -> list[tuple[str, float]]:
+    cache_dir = _get_mlx_cache_dir()
+    if not cache_dir.exists():
+        return []
+
+    results: list[tuple[str, float]] = []
+    for model_dir in sorted(cache_dir.glob("models--mlx-community--whisper-*")):
+        name = model_dir.name.removeprefix("models--mlx-community--").replace("--", "/")
+        size_bytes = sum(f.stat().st_size for f in model_dir.rglob("*") if f.is_file())
+        results.append((name, size_bytes / (1024 * 1024)))
+    return results
+
+
 @app.command()
 def list_models() -> None:
     """Показать загруженные модели Whisper."""
-    cache_dir = _get_whisper_cache_dir()
-    if not cache_dir.exists():
-        _hint("Кэш моделей пуст")
-        return
-
     current_model = settings.model
-    models = list(cache_dir.glob("*.pt"))
+    current_recognizer = settings.recognizer
+    has_any = False
 
-    if not models:
+    cache_dir = _get_whisper_cache_dir()
+    whisper_models = list(cache_dir.glob("*.pt")) if cache_dir.exists() else []
+
+    if whisper_models:
+        has_any = True
+        console.print("\n[bold]Whisper модели:[/bold]")
+        for model_file in sorted(whisper_models):
+            name = model_file.stem
+            size_mb = model_file.stat().st_size / (1024 * 1024)
+            is_active = current_recognizer == "whisper" and (
+                name == current_model or name.startswith(f"{current_model}-")
+            )
+            marker = " [green]← активная[/green]" if is_active else ""
+            console.print(f"  {name} ({size_mb:.0f} MB){marker}")
+
+    mlx_models = _list_mlx_models()
+    if mlx_models:
+        has_any = True
+        console.print("\n[bold]MLX Whisper модели:[/bold]")
+        for name, size_mb in mlx_models:
+            is_active = current_recognizer == "mlx" and current_model in name
+            marker = " [green]← активная[/green]" if is_active else ""
+            console.print(f"  {name} ({size_mb:.0f} MB){marker}")
+
+    if not has_any:
         _hint("Нет загруженных моделей")
-        return
-
-    console.print("\n[bold]Загруженные модели:[/bold]")
-    for model_file in sorted(models):
-        name = model_file.stem
-        size_mb = model_file.stat().st_size / (1024 * 1024)
-        is_active = name == current_model or name.startswith(f"{current_model}-")
-        marker = " [green]← активная[/green]" if is_active else ""
-        console.print(f"  {name} ({size_mb:.0f} MB){marker}")
 
 
 @app.command()

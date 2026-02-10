@@ -42,6 +42,9 @@ spelling = [
 verification = [
     "claude-agent-sdk>=0.1.0",
 ]
+mlx = [
+    "mlx-whisper>=0.4.0",
+]
 finetune = [
     "transformers>=4.36.0",
     "datasets>=2.14.0",

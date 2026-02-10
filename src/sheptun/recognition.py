@@ -112,6 +112,31 @@ def _apply_spell_correction(text: str) -> str:
     return correct_text(text)
 
 
+def _calculate_confidence(segments: list[dict[str, Any]]) -> float:
+    if not segments:
+        return 0.0
+
+    total_prob = 0.0
+    total_tokens = 0
+
+    for segment in segments:
+        avg_logprob = segment.get("avg_logprob", -1.0)
+        no_speech_prob = segment.get("no_speech_prob", 0.0)
+
+        if no_speech_prob > 0.5:
+            continue
+
+        prob = np.exp(avg_logprob)
+        tokens = len(segment.get("tokens", [1]))
+        total_prob += prob * tokens
+        total_tokens += tokens
+
+    if total_tokens == 0:
+        return 0.0
+
+    return float(total_prob / total_tokens)
+
+
 class _WarmupMixin:
     _warmup_interval: float
     _warmup_timer: threading.Timer | None
@@ -202,7 +227,7 @@ class WhisperRecognizer(_WarmupMixin):
         corrected_text = _apply_spell_correction(original_text)
 
         segments = result.get("segments", [])
-        confidence = self._calculate_confidence(segments)
+        confidence = _calculate_confidence(segments)
 
         return RecognitionResult(
             text=corrected_text,
@@ -228,37 +253,13 @@ class WhisperRecognizer(_WarmupMixin):
         corrected_text = _apply_spell_correction(original_text)
 
         segments = result.get("segments", [])
-        confidence = self._calculate_confidence(segments)
+        confidence = _calculate_confidence(segments)
 
         return RecognitionResult(
             text=corrected_text,
             confidence=confidence,
             original_text=original_text if corrected_text != original_text else None,
         )
-
-    def _calculate_confidence(self, segments: list[dict[str, Any]]) -> float:
-        if not segments:
-            return 0.0
-
-        total_prob = 0.0
-        total_tokens = 0
-
-        for segment in segments:
-            avg_logprob = segment.get("avg_logprob", -1.0)
-            no_speech_prob = segment.get("no_speech_prob", 0.0)
-
-            if no_speech_prob > 0.5:
-                continue
-
-            prob = np.exp(avg_logprob)
-            tokens = len(segment.get("tokens", [1]))
-            total_prob += prob * tokens
-            total_tokens += tokens
-
-        if total_tokens == 0:
-            return 0.0
-
-        return float(total_prob / total_tokens)
 
 
 class HuggingFaceWhisperRecognizer(_WarmupMixin):
@@ -328,3 +329,77 @@ def _create_asr_pipeline(
         device=device,
         generate_kwargs={"language": "russian", "task": "transcribe"},
     )
+
+
+MLX_MODELS: dict[str, str] = {
+    "tiny": "mlx-community/whisper-tiny",
+    "base": "mlx-community/whisper-base",
+    "small": "mlx-community/whisper-small",
+    "medium": "mlx-community/whisper-medium",
+    "large": "mlx-community/whisper-large-v3",
+    "turbo": "mlx-community/whisper-large-v3-turbo",
+}
+
+
+def resolve_mlx_model(model_name: str) -> str:
+    return MLX_MODELS.get(model_name, model_name)
+
+
+class MLXWhisperRecognizer(_WarmupMixin):
+    def __init__(
+        self,
+        model_name: str = "turbo",
+        hallucinations: tuple[str, ...] | None = None,
+        warmup_interval: float | None = None,
+    ) -> None:
+        self._model_repo = resolve_mlx_model(model_name)
+        self._model_name = model_name
+        self._hallucinations = {h.lower() for h in (hallucinations or settings.hallucinations)}
+        self._init_warmup(warmup_interval)
+
+    @property
+    def model_name(self) -> str:
+        return self._model_name
+
+    def _do_warmup(self) -> None:
+        import mlx_whisper  # type: ignore[import-untyped]
+
+        mlx_whisper.transcribe(  # pyright: ignore[reportUnknownMemberType]
+            _WARMUP_AUDIO,
+            path_or_hf_repo=self._model_repo,
+            language="ru",
+            fp16=True,
+        )
+
+    def recognize(self, audio_data: bytes, sample_rate: int) -> RecognitionResult | None:
+        import mlx_whisper  # type: ignore[import-untyped]
+
+        audio_array = _bytes_to_float_array(audio_data, sample_rate)
+        if audio_array is None:
+            return None
+
+        result: dict[str, Any] = mlx_whisper.transcribe(  # pyright: ignore[reportUnknownMemberType]
+            audio_array,
+            path_or_hf_repo=self._model_repo,
+            language="ru",
+            fp16=True,
+            condition_on_previous_text=False,
+        )
+
+        original_text = result.get("text", "").strip()
+        if not original_text:
+            return None
+
+        if _check_hallucination(original_text, self._hallucinations):
+            return None
+
+        corrected_text = _apply_spell_correction(original_text)
+
+        segments = result.get("segments", [])
+        confidence = _calculate_confidence(segments)
+
+        return RecognitionResult(
+            text=corrected_text,
+            confidence=confidence,
+            original_text=original_text if corrected_text != original_text else None,
+        )

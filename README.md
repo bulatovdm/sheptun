@@ -72,8 +72,8 @@ sheptun disable-autostart   # Отключить автозапуск
 
 ```bash
 # Распознавание речи
-SHEPTUN_RECOGNIZER=whisper        # whisper или apple
-SHEPTUN_MODEL=medium              # tiny, base, small, medium, large (только для whisper)
+SHEPTUN_RECOGNIZER=whisper        # whisper, mlx или apple
+SHEPTUN_MODEL=medium              # tiny, base, small, medium, large, turbo
 SHEPTUN_DEVICE=                   # cpu, cuda, mps (auto если пусто, только для whisper)
 
 # Voice Activity Detection
@@ -117,7 +117,7 @@ SHEPTUN_WARMUP_INTERVAL=120       # Интервал прогрева модел
 
 ## Движки распознавания
 
-Sheptun поддерживает два движка распознавания речи:
+Sheptun поддерживает три движка распознавания речи:
 
 ### Whisper (по умолчанию)
 
@@ -128,7 +128,20 @@ SHEPTUN_RECOGNIZER=whisper
 SHEPTUN_MODEL=medium
 ```
 
-Модели: `tiny`, `base`, `small`, `medium`, `large`
+Модели: `tiny`, `base`, `small`, `medium`, `large`, `turbo`
+
+### MLX Whisper (рекомендуется для Apple Silicon)
+
+Нативная GPU-акселерация на Apple Silicon через Metal. В ~5-6x быстрее стандартного Whisper (~0.4 сек вместо ~2.5 сек). Требует macOS 13.5+.
+
+```bash
+pip install -e ".[mlx]"
+
+SHEPTUN_RECOGNIZER=mlx
+SHEPTUN_MODEL=turbo
+```
+
+Модели: `tiny`, `base`, `small`, `medium`, `large`, `turbo`
 
 ### Apple Speech Framework
 
