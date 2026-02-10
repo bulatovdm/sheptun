@@ -380,6 +380,7 @@ class MLXWhisperRecognizer(_WarmupMixin):
         self._model_repo = resolve_mlx_model(model_name)
         self._model_name = model_name
         self._hallucinations = {h.lower() for h in (hallucinations or settings.hallucinations)}
+        self._transcribe_lock = threading.Lock()
         self._init_warmup(warmup_interval)
 
     @property
@@ -395,9 +396,7 @@ class MLXWhisperRecognizer(_WarmupMixin):
         except Exception:
             return False
 
-    def download_model(
-        self, on_progress: Callable[[int], None] | None = None
-    ) -> None:
+    def download_model(self, on_progress: Callable[[int], None] | None = None) -> None:
         import time
 
         from huggingface_hub import snapshot_download  # pyright: ignore[reportUnknownVariableType]
@@ -442,12 +441,13 @@ class MLXWhisperRecognizer(_WarmupMixin):
     def _do_warmup(self) -> None:
         import mlx_whisper  # type: ignore[import-untyped]
 
-        mlx_whisper.transcribe(  # pyright: ignore[reportUnknownMemberType]
-            _WARMUP_AUDIO,
-            path_or_hf_repo=self._model_repo,
-            language="ru",
-            fp16=True,
-        )
+        with self._transcribe_lock:
+            mlx_whisper.transcribe(  # pyright: ignore[reportUnknownMemberType]
+                _WARMUP_AUDIO,
+                path_or_hf_repo=self._model_repo,
+                language="ru",
+                fp16=True,
+            )
 
     def recognize(self, audio_data: bytes, sample_rate: int) -> RecognitionResult | None:
         import mlx_whisper  # type: ignore[import-untyped]
@@ -459,13 +459,14 @@ class MLXWhisperRecognizer(_WarmupMixin):
         duration = len(audio_array) / 16000
         logger.debug(f"MLX input: {duration:.2f}s audio ({len(audio_data)} bytes raw)")
 
-        result: dict[str, Any] = mlx_whisper.transcribe(  # pyright: ignore[reportUnknownMemberType]
-            audio_array,
-            path_or_hf_repo=self._model_repo,
-            language="ru",
-            fp16=True,
-            condition_on_previous_text=False,
-        )
+        with self._transcribe_lock:
+            result: dict[str, Any] = mlx_whisper.transcribe(  # pyright: ignore[reportUnknownMemberType]
+                audio_array,
+                path_or_hf_repo=self._model_repo,
+                language="ru",
+                fp16=True,
+                condition_on_previous_text=False,
+            )
 
         original_text = result.get("text", "").strip()
         if not original_text:
