@@ -130,6 +130,7 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
             rumps.MenuItem(t("menu_quit"), callback=self._quit),
         ]
         self._hotkey_manager.start()
+        self._subscribe_to_wake_notifications()
 
     def _on_toggle_hotkey(self) -> None:
         logger.info("Toggle hotkey pressed")
@@ -301,6 +302,35 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
 
     def show_notification(self, title: str, message: str) -> None:
         rumps.notification(title, "", message)  # type: ignore[no-untyped-call]
+
+    def _subscribe_to_wake_notifications(self) -> None:
+        try:
+            import AppKit
+
+            NSWorkspace = getattr(AppKit, "NSWorkspace")  # noqa: B009
+            NSWorkspaceDidWakeNotification = getattr(  # noqa: B009
+                AppKit, "NSWorkspaceDidWakeNotification"
+            )
+            center = NSWorkspace.sharedWorkspace().notificationCenter()
+            center.addObserver_selector_name_object_(
+                self,
+                "onWake:",
+                NSWorkspaceDidWakeNotification,
+                None,
+            )
+            logger.info("Subscribed to wake notifications")
+        except Exception as e:
+            logger.warning(f"Failed to subscribe to wake notifications: {e}")
+
+    def onWake_(self, _notification: Any) -> None:
+        logger.info("System woke from sleep")
+        with self._state_lock:
+            was_listening = self._state == AppState.RECORDING_TOGGLE
+
+        if was_listening and self._engine is not None:
+            logger.info("Restarting engine after wake")
+            self._engine.stop()
+            self._engine.start()
 
     def _restart(self, _: Any) -> None:
         import os

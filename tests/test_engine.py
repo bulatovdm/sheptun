@@ -428,3 +428,33 @@ class TestBaseVoiceEngine:
             assert elapsed < 0.1
 
             engine.stop()
+
+    def test_engine_works_after_stop_and_restart(
+        self, command_parser: CommandParser
+    ) -> None:
+        results = [
+            RecognitionResult(text="до", confidence=0.9),
+            RecognitionResult(text="после", confidence=0.9),
+        ]
+        recognizer = MockRecognizer(results=results)
+        keyboard = MockKeyboardSender()
+        status = MockStatusIndicator()
+
+        with patch("sheptun.engine.ContinuousAudioRecorder"):
+            engine = BaseVoiceEngine(
+                recognizer=recognizer,  # type: ignore[arg-type]
+                command_parser=command_parser,
+                keyboard_sender=keyboard,  # type: ignore[arg-type]
+                status_indicator=status,  # type: ignore[arg-type]
+            )
+            engine.start()
+            engine._on_speech_detected(b"\x00" * 1000)
+            engine.stop()
+
+            assert "до" in keyboard.sent_text
+
+            engine.start()
+            engine._on_speech_detected(b"\x00" * 2000)
+            engine.stop()
+
+            assert "после" in keyboard.sent_text
