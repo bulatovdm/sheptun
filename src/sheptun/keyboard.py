@@ -17,8 +17,6 @@ CGEventKeyboardSetUnicodeString: Any = getattr(  # noqa: B009
 )
 CGEventPost: Any = getattr(Quartz, "CGEventPost")  # noqa: B009
 CGEventSetFlags: Any = getattr(Quartz, "CGEventSetFlags")  # noqa: B009
-CGEventSetType: Any = getattr(Quartz, "CGEventSetType")  # noqa: B009
-kCGEventKeyUp: Any = getattr(Quartz, "kCGEventKeyUp")  # noqa: B009
 kCGEventFlagMaskAlternate: int = getattr(Quartz, "kCGEventFlagMaskAlternate")  # noqa: B009
 kCGEventFlagMaskCommand: int = getattr(Quartz, "kCGEventFlagMaskCommand")  # noqa: B009
 kCGEventFlagMaskControl: int = getattr(Quartz, "kCGEventFlagMaskControl")  # noqa: B009
@@ -198,19 +196,19 @@ class MacOSKeyboardSender:
 
     def _send_via_events(self, text: str) -> None:
         logger.debug(f"Sending text via events: '{text}' (len={len(text)})")
+        chunks: list[str] = []
         for i in range(0, len(text), MAX_UNICODE_STRING_LENGTH):
             chunk = text[i : i + MAX_UNICODE_STRING_LENGTH]
+            chunks.append(chunk)
             self._send_unicode_string(chunk)
             if i + MAX_UNICODE_STRING_LENGTH < len(text):
                 time.sleep(self._key_delay)
-        logger.debug("Events send complete")
+        logger.debug(f"Events send complete: {len(chunks)} chunks: {chunks}")
 
     def _send_unicode_string(self, text: str) -> None:
-        key_event = CGEventCreateKeyboardEvent(None, 0, True)
-        CGEventKeyboardSetUnicodeString(key_event, len(text), text)
-        CGEventPost(kCGHIDEventTap, key_event)
-        CGEventSetType(key_event, kCGEventKeyUp)
-        CGEventPost(kCGHIDEventTap, key_event)
+        key_down = CGEventCreateKeyboardEvent(None, 0, True)
+        CGEventKeyboardSetUnicodeString(key_down, len(text), text)
+        CGEventPost(kCGHIDEventTap, key_down)
 
     def send_key(self, key: str) -> None:
         key_lower = key.lower()

@@ -76,7 +76,7 @@ Command config: `./sheptun.yaml` or `~/.config/sheptun/commands.yaml`
 
 ## Debugging
 
-- App logs: `~/Library/Logs/Sheptun/sheptun.log`
+- App logs: `./logs/sheptun.log` (relative to project root)
 - Crash reports: `~/Library/Logs/DiagnosticReports/Python-*.ips` (look for `com.sheptun.menubar`)
 
 ## Key Patterns
