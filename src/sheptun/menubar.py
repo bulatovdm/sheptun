@@ -336,13 +336,9 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         import os
         import subprocess
 
-        if self._engine is not None:
-            self._engine.stop()
-        self._hotkey_manager.stop()
-
         app_path = settings.app_path
         subprocess.Popen(
-            ["open", str(app_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            ["open", "-n", str(app_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
         os._exit(0)
 
