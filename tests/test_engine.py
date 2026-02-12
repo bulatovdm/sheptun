@@ -1,5 +1,10 @@
 # pyright: reportPrivateUsage=false
+import time
+from typing import TYPE_CHECKING
 from unittest.mock import patch
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 import pytest
 
@@ -49,10 +54,23 @@ class MockStatusIndicator:
 
 
 class MockRecognizer:
-    def __init__(self, result: RecognitionResult | None = None) -> None:
+    def __init__(
+        self,
+        result: RecognitionResult | None = None,
+        results: "Sequence[RecognitionResult | None] | None" = None,
+        delay: float = 0.0,
+    ) -> None:
         self._result = result
+        self._results = list(results) if results else None
+        self._delay = delay
+        self._call_count = 0
 
     def recognize(self, _audio_data: bytes, _sample_rate: int) -> RecognitionResult | None:
+        if self._delay > 0:
+            time.sleep(self._delay)
+        self._call_count += 1
+        if self._results:
+            return self._results.pop(0) if self._results else self._result
         return self._result
 
     def start_warmup(self) -> None:
@@ -265,3 +283,148 @@ class TestBaseVoiceEngine:
             engine._execute_action(action)
 
             assert not engine.is_running()
+
+    def test_speech_detected_queues_for_recognition(
+        self, command_parser: CommandParser
+    ) -> None:
+        result = RecognitionResult(text="привет", confidence=0.9)
+        recognizer = MockRecognizer(result=result)
+        keyboard = MockKeyboardSender()
+        status = MockStatusIndicator()
+
+        with patch("sheptun.engine.ContinuousAudioRecorder"):
+            engine = BaseVoiceEngine(
+                recognizer=recognizer,  # type: ignore[arg-type]
+                command_parser=command_parser,
+                keyboard_sender=keyboard,  # type: ignore[arg-type]
+                status_indicator=status,  # type: ignore[arg-type]
+            )
+            engine.start()
+
+            engine._on_speech_detected(b"\x00" * 1000)
+            assert not engine._recognition_queue.empty()
+
+            engine.stop()
+
+    def test_recognition_worker_processes_speech(
+        self, command_parser: CommandParser
+    ) -> None:
+        result = RecognitionResult(text="привет", confidence=0.9)
+        recognizer = MockRecognizer(result=result)
+        keyboard = MockKeyboardSender()
+        status = MockStatusIndicator()
+
+        with patch("sheptun.engine.ContinuousAudioRecorder"):
+            engine = BaseVoiceEngine(
+                recognizer=recognizer,  # type: ignore[arg-type]
+                command_parser=command_parser,
+                keyboard_sender=keyboard,  # type: ignore[arg-type]
+                status_indicator=status,  # type: ignore[arg-type]
+            )
+            engine.start()
+
+            engine._on_speech_detected(b"\x00" * 1000)
+            engine.stop()
+
+            assert "привет" in keyboard.sent_text
+
+    def test_multiple_phrases_processed_sequentially(
+        self, command_parser: CommandParser
+    ) -> None:
+        results = [
+            RecognitionResult(text="раз", confidence=0.9),
+            RecognitionResult(text="два", confidence=0.9),
+            RecognitionResult(text="три", confidence=0.9),
+        ]
+        recognizer = MockRecognizer(results=results, delay=0.05)
+        keyboard = MockKeyboardSender()
+        status = MockStatusIndicator()
+
+        with patch("sheptun.engine.ContinuousAudioRecorder"):
+            engine = BaseVoiceEngine(
+                recognizer=recognizer,  # type: ignore[arg-type]
+                command_parser=command_parser,
+                keyboard_sender=keyboard,  # type: ignore[arg-type]
+                status_indicator=status,  # type: ignore[arg-type]
+            )
+            engine.start()
+
+            engine._on_speech_detected(b"\x00" * 1000)
+            engine._on_speech_detected(b"\x00" * 2000)
+            engine._on_speech_detected(b"\x00" * 3000)
+
+            engine.stop()
+
+            assert "раз" in keyboard.sent_text
+            assert "два" in keyboard.sent_text
+            assert "три" in keyboard.sent_text
+            assert recognizer._call_count == 3
+
+    def test_speech_detected_ignored_when_idle(
+        self, command_parser: CommandParser
+    ) -> None:
+        result = RecognitionResult(text="привет", confidence=0.9)
+        recognizer = MockRecognizer(result=result)
+        keyboard = MockKeyboardSender()
+        status = MockStatusIndicator()
+
+        with patch("sheptun.engine.ContinuousAudioRecorder"):
+            engine = BaseVoiceEngine(
+                recognizer=recognizer,  # type: ignore[arg-type]
+                command_parser=command_parser,
+                keyboard_sender=keyboard,  # type: ignore[arg-type]
+                status_indicator=status,  # type: ignore[arg-type]
+            )
+            engine._on_speech_detected(b"\x00" * 1000)
+
+            assert engine._recognition_queue.empty()
+            assert len(keyboard.sent_text) == 0
+
+    def test_stop_waits_for_pending_recognition(
+        self, command_parser: CommandParser
+    ) -> None:
+        result = RecognitionResult(text="тест", confidence=0.9)
+        recognizer = MockRecognizer(result=result, delay=0.1)
+        keyboard = MockKeyboardSender()
+        status = MockStatusIndicator()
+
+        with patch("sheptun.engine.ContinuousAudioRecorder"):
+            engine = BaseVoiceEngine(
+                recognizer=recognizer,  # type: ignore[arg-type]
+                command_parser=command_parser,
+                keyboard_sender=keyboard,  # type: ignore[arg-type]
+                status_indicator=status,  # type: ignore[arg-type]
+            )
+            engine.start()
+
+            engine._on_speech_detected(b"\x00" * 1000)
+            time.sleep(0.01)
+            engine.stop()
+
+            assert "тест" in keyboard.sent_text
+
+    def test_callback_thread_not_blocked_during_recognition(
+        self, command_parser: CommandParser
+    ) -> None:
+        result = RecognitionResult(text="привет", confidence=0.9)
+        recognizer = MockRecognizer(result=result, delay=0.2)
+        keyboard = MockKeyboardSender()
+        status = MockStatusIndicator()
+
+        with patch("sheptun.engine.ContinuousAudioRecorder"):
+            engine = BaseVoiceEngine(
+                recognizer=recognizer,  # type: ignore[arg-type]
+                command_parser=command_parser,
+                keyboard_sender=keyboard,  # type: ignore[arg-type]
+                status_indicator=status,  # type: ignore[arg-type]
+            )
+            engine.start()
+
+            engine._on_speech_detected(b"\x00" * 1000)
+            start = time.monotonic()
+            engine._on_speech_detected(b"\x00" * 2000)
+            elapsed = time.monotonic() - start
+
+            assert elapsed < 0.1
+
+            engine.stop()

@@ -1,4 +1,5 @@
 import logging
+import queue
 import threading
 from pathlib import Path
 
@@ -42,6 +43,8 @@ class BaseVoiceEngine:
         self._lock = threading.Lock()
         self._current_window_id: str | None = None
         self._window_text_sent: dict[str, bool] = {}
+        self._recognition_queue: queue.Queue[bytes | None] = queue.Queue()
+        self._recognition_thread: threading.Thread | None = None
 
     @property
     def state(self) -> AppState:
@@ -61,6 +64,10 @@ class BaseVoiceEngine:
 
         self._on_start()
         self._recognizer.start_warmup()
+        self._recognition_thread = threading.Thread(
+            target=self._recognition_worker, daemon=True
+        )
+        self._recognition_thread.start()
         self._recorder.set_speech_start_callback(self._on_speech_started)
         self._recorder.set_callback(self._on_speech_detected)
         self._recorder.start()
@@ -69,10 +76,16 @@ class BaseVoiceEngine:
         with self._lock:
             if self._state == AppState.IDLE:
                 return
-            self._state = AppState.IDLE
 
         self._recognizer.stop_warmup()
         self._recorder.stop()
+        self._recognition_queue.put(None)
+        if self._recognition_thread is not None:
+            self._recognition_thread.join(timeout=10.0)
+            self._recognition_thread = None
+
+        with self._lock:
+            self._state = AppState.IDLE
         self._on_stop()
 
     def is_running(self) -> bool:
@@ -132,8 +145,20 @@ class BaseVoiceEngine:
     def _on_speech_detected(self, audio_data: bytes) -> None:
         if self.state == AppState.IDLE:
             return
-
         self._log(f"Speech detected: {len(audio_data)} bytes")
+        self._recognition_queue.put(audio_data)
+
+    def _recognition_worker(self) -> None:
+        while True:
+            audio_data = self._recognition_queue.get()
+            if audio_data is None:
+                break
+            self._process_speech(audio_data)
+
+    def _process_speech(self, audio_data: bytes) -> None:
+        if self.state == AppState.IDLE:
+            return
+
         self._set_state(AppState.PROCESSING)
         self._status.processing()
 
