@@ -216,6 +216,7 @@ class WhisperRecognizer(_WarmupMixin):
             language="ru",
             fp16=False,
             task="transcribe",
+            condition_on_previous_text=False,
         )
 
         original_text = result.get("text", "").strip()
@@ -244,6 +245,7 @@ class WhisperRecognizer(_WarmupMixin):
             language="ru",
             fp16=False,
             task="transcribe",
+            condition_on_previous_text=False,
         )
 
         original_text = result.get("text", "").strip()
