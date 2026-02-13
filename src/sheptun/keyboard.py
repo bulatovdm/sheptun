@@ -32,6 +32,7 @@ kCGEventFlagMaskAlternate: int = getattr(Quartz, "kCGEventFlagMaskAlternate")  #
 kCGEventFlagMaskCommand: int = getattr(Quartz, "kCGEventFlagMaskCommand")  # noqa: B009
 kCGEventFlagMaskControl: int = getattr(Quartz, "kCGEventFlagMaskControl")  # noqa: B009
 kCGEventFlagMaskShift: int = getattr(Quartz, "kCGEventFlagMaskShift")  # noqa: B009
+kCGEventFlagMaskNonCoalesced: int = getattr(Quartz, "kCGEventFlagMaskNonCoalesced")  # noqa: B009
 kCGAnnotatedSessionEventTap: Any = getattr(Quartz, "kCGAnnotatedSessionEventTap")  # noqa: B009
 kCGHIDEventTap: Any = getattr(Quartz, "kCGHIDEventTap")  # noqa: B009
 
@@ -231,7 +232,7 @@ class MacOSKeyboardSender:
     def _send_unicode_string(self, text: str) -> None:
         key_down = CGEventCreateKeyboardEvent(self._event_source, 0, True)
         CGEventKeyboardSetUnicodeString(key_down, len(text), text)
-        CGEventSetFlags(key_down, 0)
+        CGEventSetFlags(key_down, kCGEventFlagMaskNonCoalesced)
         CGEventSetIntegerValueField(key_down, kCGEventSourceUserData, SHEPTUN_EVENT_MARKER)
         CGEventPost(kCGAnnotatedSessionEventTap, key_down)
 
