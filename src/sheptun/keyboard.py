@@ -8,8 +8,12 @@ import Quartz
 
 logger = logging.getLogger("sheptun.keyboard")
 
+NSData: Any = getattr(AppKit, "NSData")  # noqa: B009
 NSPasteboard: Any = getattr(AppKit, "NSPasteboard")  # noqa: B009
+NSPasteboardType: Any = getattr(AppKit, "NSPasteboardType")  # noqa: B009
 NSPasteboardTypeString: Any = getattr(AppKit, "NSPasteboardTypeString")  # noqa: B009
+
+TRANSIENT_PASTEBOARD_TYPE = "org.nspasteboard.TransientType"
 
 CGEventCreateKeyboardEvent: Any = getattr(Quartz, "CGEventCreateKeyboardEvent")  # noqa: B009
 CGEventKeyboardSetUnicodeString: Any = getattr(  # noqa: B009
@@ -17,17 +21,22 @@ CGEventKeyboardSetUnicodeString: Any = getattr(  # noqa: B009
 )
 CGEventPost: Any = getattr(Quartz, "CGEventPost")  # noqa: B009
 CGEventSetFlags: Any = getattr(Quartz, "CGEventSetFlags")  # noqa: B009
+CGEventSetIntegerValueField: Any = getattr(Quartz, "CGEventSetIntegerValueField")  # noqa: B009
 CGEventSourceCreate: Any = getattr(Quartz, "CGEventSourceCreate")  # noqa: B009
-kCGEventSourceStateHIDSystemState: Any = getattr(  # noqa: B009
-    Quartz, "kCGEventSourceStateHIDSystemState"
+CGEventSourceSetLocalEventsSuppressionInterval: Any = getattr(  # noqa: B009
+    Quartz, "CGEventSourceSetLocalEventsSuppressionInterval"
 )
+kCGEventSourceStatePrivate: int = getattr(Quartz, "kCGEventSourceStatePrivate")  # noqa: B009
+kCGEventSourceUserData: int = 42  # CGEventField for user data
 kCGEventFlagMaskAlternate: int = getattr(Quartz, "kCGEventFlagMaskAlternate")  # noqa: B009
 kCGEventFlagMaskCommand: int = getattr(Quartz, "kCGEventFlagMaskCommand")  # noqa: B009
 kCGEventFlagMaskControl: int = getattr(Quartz, "kCGEventFlagMaskControl")  # noqa: B009
 kCGEventFlagMaskShift: int = getattr(Quartz, "kCGEventFlagMaskShift")  # noqa: B009
+kCGAnnotatedSessionEventTap: Any = getattr(Quartz, "kCGAnnotatedSessionEventTap")  # noqa: B009
 kCGHIDEventTap: Any = getattr(Quartz, "kCGHIDEventTap")  # noqa: B009
 
 MAX_UNICODE_STRING_LENGTH = 20
+SHEPTUN_EVENT_MARKER = 0x534850  # "SHP" — unique marker for our events
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,6 +162,8 @@ class MacOSKeyboardSender:
         self._key_delay = key_delay if key_delay is not None else settings.key_delay
         self._use_clipboard = use_clipboard
         self._pasteboard = NSPasteboard.generalPasteboard()
+        self._event_source = CGEventSourceCreate(kCGEventSourceStatePrivate)
+        CGEventSourceSetLocalEventsSuppressionInterval(self._event_source, 0.0)
 
     def start_capture(self) -> None:
         pass
@@ -172,11 +183,12 @@ class MacOSKeyboardSender:
         old_change_count = self._pasteboard.changeCount()
 
         self._set_clipboard(text)
+        time.sleep(0.05)
         self._paste()
         time.sleep(0.05)
 
         if old_contents is not None:
-            self._set_clipboard(old_contents)
+            self._restore_clipboard(old_contents)
         elif self._pasteboard.changeCount() != old_change_count:
             self._pasteboard.clearContents()
         logger.debug("Clipboard send complete")
@@ -186,6 +198,13 @@ class MacOSKeyboardSender:
         return result
 
     def _set_clipboard(self, text: str) -> None:
+        self._pasteboard.clearContents()
+        self._pasteboard.setString_forType_(text, NSPasteboardTypeString)
+        self._pasteboard.setData_forType_(
+            NSData.data(), NSPasteboardType(TRANSIENT_PASTEBOARD_TYPE)
+        )
+
+    def _restore_clipboard(self, text: str) -> None:
         self._pasteboard.clearContents()
         self._pasteboard.setString_forType_(text, NSPasteboardTypeString)
 
@@ -210,10 +229,11 @@ class MacOSKeyboardSender:
         logger.debug(f"Events send complete: {len(chunks)} chunks: {chunks}")
 
     def _send_unicode_string(self, text: str) -> None:
-        source = CGEventSourceCreate(kCGEventSourceStateHIDSystemState)
-        key_down = CGEventCreateKeyboardEvent(source, 0, True)
+        key_down = CGEventCreateKeyboardEvent(self._event_source, 0, True)
         CGEventKeyboardSetUnicodeString(key_down, len(text), text)
-        CGEventPost(kCGHIDEventTap, key_down)
+        CGEventSetFlags(key_down, 0)
+        CGEventSetIntegerValueField(key_down, kCGEventSourceUserData, SHEPTUN_EVENT_MARKER)
+        CGEventPost(kCGAnnotatedSessionEventTap, key_down)
 
     def send_key(self, key: str) -> None:
         key_lower = key.lower()
