@@ -37,7 +37,9 @@ class BaseVoiceEngine:
         self._command_parser = command_parser
         self._keyboard = keyboard_sender
         self._status = status_indicator
-        self._recorder = ContinuousAudioRecorder(audio_config, vad_config)
+        self._audio_config = audio_config
+        self._vad_config = vad_config
+        self._recorder: ContinuousAudioRecorder | None = None
         self._dataset_recorder = DatasetRecorder() if record_dataset else None
         self._state = AppState.IDLE
         self._lock = threading.Lock()
@@ -50,6 +52,13 @@ class BaseVoiceEngine:
     def state(self) -> AppState:
         with self._lock:
             return self._state
+
+    @property
+    def sample_rate(self) -> int:
+        if self._recorder is not None:
+            return self._recorder.sample_rate
+        config = self._audio_config or AudioConfig()
+        return config.sample_rate
 
     def _set_state(self, state: AppState) -> None:
         with self._lock:
@@ -64,10 +73,12 @@ class BaseVoiceEngine:
 
         self._on_start()
         self._recognizer.start_warmup()
+        self._recognition_queue = queue.Queue()
         self._recognition_thread = threading.Thread(
             target=self._recognition_worker, daemon=True
         )
         self._recognition_thread.start()
+        self._recorder = ContinuousAudioRecorder(self._audio_config, self._vad_config)
         self._recorder.set_speech_start_callback(self._on_speech_started)
         self._recorder.set_callback(self._on_speech_detected)
         self._recorder.start()
@@ -78,11 +89,13 @@ class BaseVoiceEngine:
                 return
 
         self._recognizer.stop_warmup()
-        self._recorder.stop()
+        if self._recorder is not None:
+            self._recorder.stop()
         self._recognition_queue.put(None)
         if self._recognition_thread is not None:
             self._recognition_thread.join(timeout=10.0)
             self._recognition_thread = None
+        self._recorder = None
 
         with self._lock:
             self._state = AppState.IDLE
@@ -98,7 +111,7 @@ class BaseVoiceEngine:
 
     def recognize_and_execute(self, audio_data: bytes) -> None:
         try:
-            result = self._recognizer.recognize(audio_data, self._recorder.sample_rate)
+            result = self._recognizer.recognize(audio_data, self.sample_rate)
             if result and result.text:
                 self._log(f"Recognized: '{result.text}'")
                 self._save_to_dataset(audio_data, result.text)
@@ -163,7 +176,7 @@ class BaseVoiceEngine:
         self._status.processing()
 
         try:
-            result = self._recognizer.recognize(audio_data, self._recorder.sample_rate)
+            result = self._recognizer.recognize(audio_data, self.sample_rate)
 
             if result is None or not result.text:
                 self._log("Recognition returned empty result")

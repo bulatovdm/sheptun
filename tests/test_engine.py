@@ -458,3 +458,80 @@ class TestBaseVoiceEngine:
             engine.stop()
 
             assert "после" in keyboard.sent_text
+
+    def test_start_creates_fresh_recorder(
+        self, command_parser: CommandParser
+    ) -> None:
+        status = MockStatusIndicator()
+        recognizer = MockRecognizer()
+        keyboard = MockKeyboardSender()
+
+        with patch("sheptun.engine.ContinuousAudioRecorder") as MockRecorder:
+            engine = BaseVoiceEngine(
+                recognizer=recognizer,  # type: ignore[arg-type]
+                command_parser=command_parser,
+                keyboard_sender=keyboard,  # type: ignore[arg-type]
+                status_indicator=status,  # type: ignore[arg-type]
+            )
+            engine.start()
+            engine.stop()
+
+            engine.start()
+            engine.stop()
+
+            assert MockRecorder.call_count == 2
+
+    def test_start_creates_fresh_recognition_queue(
+        self, command_parser: CommandParser
+    ) -> None:
+        status = MockStatusIndicator()
+        recognizer = MockRecognizer()
+        keyboard = MockKeyboardSender()
+
+        with patch("sheptun.engine.ContinuousAudioRecorder"):
+            engine = BaseVoiceEngine(
+                recognizer=recognizer,  # type: ignore[arg-type]
+                command_parser=command_parser,
+                keyboard_sender=keyboard,  # type: ignore[arg-type]
+                status_indicator=status,  # type: ignore[arg-type]
+            )
+            engine.start()
+            first_queue = engine._recognition_queue
+            engine.stop()
+
+            engine.start()
+            second_queue = engine._recognition_queue
+            engine.stop()
+
+            assert first_queue is not second_queue
+
+    def test_no_stale_events_across_toggle_cycles(
+        self, command_parser: CommandParser
+    ) -> None:
+        results = [
+            RecognitionResult(text="сессия1", confidence=0.9),
+            RecognitionResult(text="сессия2", confidence=0.9),
+        ]
+        recognizer = MockRecognizer(results=results)
+        keyboard = MockKeyboardSender()
+        status = MockStatusIndicator()
+
+        with patch("sheptun.engine.ContinuousAudioRecorder"):
+            engine = BaseVoiceEngine(
+                recognizer=recognizer,  # type: ignore[arg-type]
+                command_parser=command_parser,
+                keyboard_sender=keyboard,  # type: ignore[arg-type]
+                status_indicator=status,  # type: ignore[arg-type]
+            )
+            engine.start()
+            engine._on_speech_detected(b"\x00" * 1000)
+            engine.stop()
+
+            assert "сессия1" in keyboard.sent_text
+
+            engine.start()
+            engine._on_speech_detected(b"\x00" * 2000)
+            engine.stop()
+
+            assert "сессия2" in keyboard.sent_text
+            assert keyboard.sent_text.count("сессия1") == 1
