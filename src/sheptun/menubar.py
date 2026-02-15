@@ -1,6 +1,7 @@
 import importlib.resources
 import logging
 import threading
+from collections.abc import Callable
 from typing import Any
 
 import rumps
@@ -132,6 +133,19 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         self._hotkey_manager.start()
         self._subscribe_to_wake_notifications()
 
+    def _run_on_main_thread(self, func: Callable[[], None]) -> None:
+        """Schedule a function to run on the main thread via NSOperationQueue."""
+        try:
+            from Foundation import NSOperationQueue  # type: ignore[import-untyped]
+
+            NSOperationQueue.mainQueue().addOperationWithBlock_(func)
+        except ImportError:
+            func()
+
+    def _set_icon(self, icon_path: str) -> None:
+        """Thread-safe icon update."""
+        self._run_on_main_thread(lambda: setattr(self, "icon", icon_path))
+
     def _on_toggle_hotkey(self) -> None:
         logger.info("Toggle hotkey pressed")
         self._toggle_listening(self._toggle_menu_item)
@@ -154,7 +168,7 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
             self._ptt_keyboard = FocusAwareKeyboardSender()
 
         self._ptt_keyboard.start_capture()
-        self.icon = self._icon_listening
+        self._set_icon(self._icon_listening)
         self._ptt_recorder.start()
 
     def _on_ptt_stop(self) -> None:
@@ -171,11 +185,11 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         audio_data = self._ptt_recorder.stop()
         if len(audio_data) < 1000:
             self._set_state(AppState.IDLE)
-            self.icon = self._icon_idle
+            self._set_icon(self._icon_idle)
             return
 
         self._set_state(AppState.PROCESSING)
-        self.icon = self._icon_processing
+        self._set_icon(self._icon_processing)
         threading.Thread(target=self._process_ptt_audio, args=(audio_data,), daemon=True).start()
 
     def _process_ptt_audio(self, audio_data: bytes) -> None:
@@ -183,7 +197,7 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
 
         if self._engine is None:
             self._set_state(AppState.IDLE)
-            self.icon = self._icon_idle
+            self._set_icon(self._icon_idle)
             self._end_ptt_capture()
             return
 
@@ -195,7 +209,7 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
             logger.exception(f"PTT error: {e}")
         finally:
             self._set_state(AppState.IDLE)
-            self.icon = self._icon_idle
+            self._set_icon(self._icon_idle)
             self._end_ptt_capture()
             self._engine.set_keyboard_sender(
                 MacOSKeyboardSender(use_clipboard=settings.use_clipboard)
@@ -212,7 +226,7 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
 
     def _ensure_engine_initialized(self) -> None:
         if self._engine is None:
-            self.icon = self._icon_processing
+            self._set_icon(self._icon_processing)
             self.show_notification("Sheptun", t("notification_loading"))
             self._init_engine()
 
@@ -265,7 +279,7 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
             is_toggle_active = self._state == AppState.RECORDING_TOGGLE
 
         if self._engine is None:
-            self.icon = self._icon_processing
+            self._set_icon(self._icon_processing)
             self.show_notification("Sheptun", t("notification_loading"))
             threading.Thread(target=self._init_and_start, daemon=True).start()
         elif is_toggle_active:
@@ -292,13 +306,13 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
     def set_listening(self, listening: bool) -> None:
         if listening:
             self._set_state(AppState.RECORDING_TOGGLE)
-            self.icon = self._icon_listening
+            self._set_icon(self._icon_listening)
         else:
             self._set_state(AppState.IDLE)
-            self.icon = self._icon_idle
+            self._set_icon(self._icon_idle)
 
     def set_processing(self) -> None:
-        self.icon = self._icon_processing
+        self._set_icon(self._icon_processing)
 
     def show_notification(self, title: str, message: str) -> None:
         rumps.notification(title, "", message)  # type: ignore[no-untyped-call]
