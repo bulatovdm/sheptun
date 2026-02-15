@@ -205,6 +205,13 @@ def get_vad_blocksize(vad_type: str) -> int:
 
 def create_vad(config: VoiceActivityConfig, vad_type: str = "energy") -> EnergyVAD | SileroVAD:
     if vad_type == "silero":
+        try:
+            import silero_vad as _  # type: ignore[import-untyped]  # noqa: F811, F401
+        except ImportError:
+            raise ImportError(
+                "Silero VAD requires 'silero-vad' package. "
+                "Install it with: pip install -e '.[silero]'"
+            ) from None
         return SileroVAD(config)
     return EnergyVAD(config)
 
