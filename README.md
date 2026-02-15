@@ -5,11 +5,24 @@
 ## Установка
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Настроить конфигурацию перед установкой
+cp .env.example .env
+# Отредактируйте .env — выберите SHEPTUN_RECOGNIZER (whisper, mlx или apple)
+
+# Установить базовые зависимости
 pip install -e .
 
-# Активировать виртуальное окружение
-source .venv/bin/activate
+# Для MLX Whisper (рекомендуется для Apple Silicon)
+pip install -e ".[mlx]"
+
+# Для разработки
+pip install -e ".[dev]"
 ```
+
+**Важно:** настройте `.env` до сборки приложения (`sheptun install-app`), так как от выбранного движка (`SHEPTUN_RECOGNIZER`) зависит, какие зависимости нужно установить. Например, для `mlx` необходим `pip install -e ".[mlx]"`.
 
 ## Использование
 
