@@ -123,11 +123,15 @@ class _RemoteRequestHandler(BaseHTTPRequestHandler):
             self._send_json(500, {"error": "no keyboard sender"})
             return
 
+        on_receive = self.server.on_receive
+
         if self.path == "/api/text":
             text = data.get("text", "")
             if not text:
                 self._send_json(400, {"error": "missing text"})
                 return
+            if on_receive:
+                on_receive()
             keyboard.send_text(text)
             self._send_json(200, {"status": "ok"})
 
@@ -136,6 +140,8 @@ class _RemoteRequestHandler(BaseHTTPRequestHandler):
             if not key:
                 self._send_json(400, {"error": "missing key"})
                 return
+            if on_receive:
+                on_receive()
             keyboard.send_key(key)
             self._send_json(200, {"status": "ok"})
 
@@ -144,6 +150,8 @@ class _RemoteRequestHandler(BaseHTTPRequestHandler):
             if not keys:
                 self._send_json(400, {"error": "missing keys"})
                 return
+            if on_receive:
+                on_receive()
             keyboard.send_hotkey(keys)
             self._send_json(200, {"status": "ok"})
 
@@ -158,10 +166,12 @@ class RemoteHTTPServer(HTTPServer):
         keyboard_sender: Any,
         token: str = "",
         is_busy: Callable[[], bool] | None = None,
+        on_receive: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(("0.0.0.0", port), _RemoteRequestHandler)
         self.keyboard_sender = keyboard_sender
         self.token = token
+        self.on_receive = on_receive
         self.is_busy = is_busy
 
 
@@ -172,8 +182,9 @@ class RemoteServer:
         port: int = DEFAULT_PORT,
         token: str = "",
         is_busy: Callable[[], bool] | None = None,
+        on_receive: Callable[[], None] | None = None,
     ) -> None:
-        self._server = RemoteHTTPServer(port, keyboard_sender, token, is_busy)
+        self._server = RemoteHTTPServer(port, keyboard_sender, token, is_busy, on_receive)
         self._thread: threading.Thread | None = None
         self._bonjour_service: Any = None
 

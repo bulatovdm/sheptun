@@ -111,6 +111,12 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         self._icon_idle = _get_icon_path("mic_idle.png")
         self._icon_listening = _get_icon_path("mic_active.png")
         self._icon_processing = _get_icon_path("mic_processing.png")
+        self._icon_remote_idle = _get_icon_path("mic_remote_idle.png")
+        self._icon_remote_listening = _get_icon_path("mic_remote_active.png")
+        self._icon_receive_idle = _get_icon_path("mic_receive.png")
+        self._icon_receive_listening = _get_icon_path("mic_receive_active.png")
+        self._uc_active = False
+        self._receive_timer: threading.Timer | None = None
         self.icon = self._icon_idle
 
         self._hotkey_manager = HotkeyManager(
@@ -151,6 +157,8 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
 
         self._hotkey_manager.start()
         self._subscribe_to_wake_notifications()
+        if settings.remote_enabled:
+            self._subscribe_to_app_activation()
         self._start_remote_services()
 
     def _start_remote_services(self) -> None:
@@ -163,6 +171,7 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
                 port=settings.remote_port,
                 token=settings.remote_token,
                 is_busy=lambda: self._state != AppState.IDLE,
+                on_receive=self._on_remote_receive,
             )
             self._remote_server.start()
             logger.info(f"Remote server started on port {settings.remote_port}")
@@ -212,9 +221,19 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         except ImportError:
             func()
 
+    def _resolve_icon(self, icon_path: str) -> str:
+        """Substitute remote icon variant when UC is active."""
+        if self._uc_active and settings.remote_enabled:
+            if icon_path == self._icon_idle:
+                return self._icon_remote_idle
+            if icon_path == self._icon_listening:
+                return self._icon_remote_listening
+        return icon_path
+
     def _set_icon(self, icon_path: str) -> None:
         """Thread-safe icon update."""
-        self._run_on_main_thread(lambda: setattr(self, "icon", icon_path))
+        resolved = self._resolve_icon(icon_path)
+        self._run_on_main_thread(lambda: setattr(self, "icon", resolved))
 
     def _on_toggle_hotkey(self) -> None:
         logger.info("Toggle hotkey pressed")
@@ -447,6 +466,70 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
             logger.info("Restarting engine after wake")
             self._engine.stop()
             self._engine.start()
+
+    def _subscribe_to_app_activation(self) -> None:
+        try:
+            import AppKit
+
+            NSWorkspace = getattr(AppKit, "NSWorkspace")  # noqa: B009
+            NSWorkspaceDidActivateApplicationNotification = getattr(  # noqa: B009
+                AppKit, "NSWorkspaceDidActivateApplicationNotification"
+            )
+            center = NSWorkspace.sharedWorkspace().notificationCenter()
+            center.addObserver_selector_name_object_(
+                self,
+                "onAppActivated:",
+                NSWorkspaceDidActivateApplicationNotification,
+                None,
+            )
+            logger.info("Subscribed to app activation notifications")
+        except Exception as e:
+            logger.warning(f"Failed to subscribe to app activation: {e}")
+
+    def onAppActivated_(self, notification: Any) -> None:
+        from sheptun.remote import UC_BUNDLE_ID
+
+        try:
+            app = notification.userInfo().get("NSWorkspaceApplicationKey")
+            bundle_id = str(app.bundleIdentifier() or "") if app else ""
+            was_uc = self._uc_active
+            self._uc_active = bundle_id == UC_BUNDLE_ID
+
+            if self._uc_active != was_uc:
+                logger.info(f"UC active: {self._uc_active}")
+                self._refresh_icon()
+        except Exception as e:
+            logger.debug(f"App activation handler error: {e}")
+
+    def _refresh_icon(self) -> None:
+        """Re-apply current icon with UC state taken into account."""
+        with self._state_lock:
+            state = self._state
+
+        if state == AppState.IDLE:
+            self._set_icon(self._icon_idle)
+        elif state in (AppState.RECORDING_TOGGLE, AppState.RECORDING_PTT):
+            self._set_icon(self._icon_listening)
+        else:
+            self._set_icon(self._icon_processing)
+
+    def _on_remote_receive(self) -> None:
+        """Called by RemoteServer when text is received from remote."""
+        with self._state_lock:
+            state = self._state
+
+        if state in (AppState.RECORDING_TOGGLE, AppState.RECORDING_PTT):
+            receive_icon = self._icon_receive_listening
+        else:
+            receive_icon = self._icon_receive_idle
+
+        self._run_on_main_thread(lambda: setattr(self, "icon", receive_icon))
+
+        if self._receive_timer is not None:
+            self._receive_timer.cancel()
+        self._receive_timer = threading.Timer(0.5, self._refresh_icon)
+        self._receive_timer.daemon = True
+        self._receive_timer.start()
 
     def _restart(self, _: Any) -> None:
         import os
