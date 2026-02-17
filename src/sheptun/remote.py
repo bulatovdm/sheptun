@@ -294,6 +294,8 @@ class RemoteDiscovery:
         self._lock = threading.Lock()
         self._browser: Any = None
         self._delegate: Any = None
+        self._thread: threading.Thread | None = None
+        self._run_loop: Any = None
 
     @property
     def hosts(self) -> dict[str, tuple[str, int]]:
@@ -308,21 +310,23 @@ class RemoteDiscovery:
             return None
 
     def start(self) -> None:
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
         try:
             import Foundation  # type: ignore[import-untyped]
 
             NSNetServiceBrowser: Any = getattr(Foundation, "NSNetServiceBrowser")  # noqa: B009
             NSObject: Any = getattr(Foundation, "NSObject")  # noqa: B009
+            NSRunLoop: Any = getattr(Foundation, "NSRunLoop")  # noqa: B009
+            NSDate: Any = getattr(Foundation, "NSDate")  # noqa: B009
 
             discovery = self
+            # Strong refs to prevent garbage collection of ObjC objects
+            service_refs: list[tuple[Any, Any]] = []
 
-            class BrowserDelegate(NSObject):  # type: ignore[misc]
-                def netServiceBrowser_didFindService_moreComing_(  # type: ignore[override]
-                    self, _browser: Any, service: Any, _more_coming: bool
-                ) -> None:
-                    service.setDelegate_(self)
-                    service.resolveWithTimeout_(5.0)
-
+            class ServiceDelegate(NSObject):  # type: ignore[misc]
                 def netServiceDidResolveAddress_(self, service: Any) -> None:  # type: ignore[override]
                     name = str(service.name())
                     hostname = str(service.hostName())
@@ -330,6 +334,20 @@ class RemoteDiscovery:
                     with discovery._lock:
                         discovery._hosts[name] = (hostname, port)
                     logger.info(f"Discovered remote: {name} at {hostname}:{port}")
+
+                def netService_didNotResolve_(  # type: ignore[override]
+                    self, service: Any, _error: Any
+                ) -> None:
+                    logger.warning(f"Failed to resolve: {service.name()}")
+
+            class BrowserDelegate(NSObject):  # type: ignore[misc]
+                def netServiceBrowser_didFindService_moreComing_(  # type: ignore[override]
+                    self, _browser: Any, service: Any, _more_coming: bool
+                ) -> None:
+                    sd = ServiceDelegate.alloc().init()
+                    service_refs.append((service, sd))
+                    service.setDelegate_(sd)
+                    service.resolveWithTimeout_(5.0)
 
                 def netServiceBrowser_didRemoveService_moreComing_(  # type: ignore[override]
                     self, _browser: Any, service: Any, _more_coming: bool
@@ -343,7 +361,14 @@ class RemoteDiscovery:
             self._browser = NSNetServiceBrowser.alloc().init()
             self._browser.setDelegate_(self._delegate)
             self._browser.searchForServicesOfType_inDomain_(BONJOUR_SERVICE_TYPE, "")
+
+            self._run_loop = NSRunLoop.currentRunLoop()
             logger.info("Bonjour discovery started")
+
+            while self._browser is not None:
+                self._run_loop.runMode_beforeDate_(
+                    "NSDefaultRunLoopMode", NSDate.dateWithTimeIntervalSinceNow_(1.0)
+                )
         except Exception as e:
             logger.warning(f"Failed to start Bonjour discovery: {e}")
 
@@ -352,5 +377,8 @@ class RemoteDiscovery:
             self._browser.stop()
             self._browser = None
             self._delegate = None
+        if self._thread is not None:
+            self._thread.join(timeout=3.0)
+            self._thread = None
         with self._lock:
             self._hosts.clear()

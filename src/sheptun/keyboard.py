@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from sheptun.remote import RemoteClient
 
 import AppKit
@@ -335,13 +337,15 @@ class RemoteAwareKeyboardSender:
     def __init__(
         self,
         local_sender: MacOSKeyboardSender,
-        remote_client: RemoteClient,
+        remote_client: RemoteClient | None = None,
         auto_detect: bool = True,
+        remote_client_factory: Callable[[], RemoteClient | None] | None = None,
     ) -> None:
         from sheptun.remote import is_cursor_on_local_screen
 
         self._local = local_sender
         self._remote = remote_client
+        self._remote_client_factory = remote_client_factory
         self._auto_detect = auto_detect
         self._is_cursor_on_local_screen = is_cursor_on_local_screen
         self._force_remote = False
@@ -354,6 +358,16 @@ class RemoteAwareKeyboardSender:
     def force_remote(self, value: bool) -> None:
         self._force_remote = value
 
+    def _get_remote(self) -> RemoteClient | None:
+        if self._remote is not None:
+            return self._remote
+        if self._remote_client_factory is not None:
+            client = self._remote_client_factory()
+            if client is not None:
+                self._remote = client
+            return client
+        return None
+
     def _is_remote(self) -> bool:
         if self._force_remote:
             return True
@@ -362,17 +376,20 @@ class RemoteAwareKeyboardSender:
         return False
 
     def send_text(self, text: str) -> None:
-        if self._is_remote() and self._remote.send_text(text):
+        remote = self._get_remote()
+        if self._is_remote() and remote is not None and remote.send_text(text):
             return
         self._local.send_text(text)
 
     def send_key(self, key: str) -> None:
-        if self._is_remote() and self._remote.send_key(key):
+        remote = self._get_remote()
+        if self._is_remote() and remote is not None and remote.send_key(key):
             return
         self._local.send_key(key)
 
     def send_hotkey(self, keys: list[str]) -> None:
-        if self._is_remote() and self._remote.send_hotkey(keys):
+        remote = self._get_remote()
+        if self._is_remote() and remote is not None and remote.send_hotkey(keys):
             return
         self._local.send_hotkey(keys)
 

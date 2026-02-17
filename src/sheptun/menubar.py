@@ -236,12 +236,12 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
 
         if self._ptt_keyboard is None:
             base_keyboard = MacOSKeyboardSender(use_clipboard=settings.use_clipboard)
-            remote_client = self._get_remote_client() if settings.remote_enabled else None
-            if remote_client is not None:
+            if settings.remote_enabled:
                 self._ptt_keyboard = RemoteAwareKeyboardSender(
                     local_sender=base_keyboard,
-                    remote_client=remote_client,
+                    remote_client=self._remote_client,
                     auto_detect=settings.remote_auto_detect,
+                    remote_client_factory=self._get_remote_client,
                 )
             else:
                 self._ptt_keyboard = FocusAwareKeyboardSender(keyboard_sender=base_keyboard)
@@ -296,13 +296,13 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         if self._engine is None:
             return
         base_keyboard = MacOSKeyboardSender(use_clipboard=settings.use_clipboard)
-        remote_client = self._get_remote_client() if settings.remote_enabled else None
-        if remote_client is not None:
+        if settings.remote_enabled:
             self._engine.set_keyboard_sender(
                 RemoteAwareKeyboardSender(
                     local_sender=base_keyboard,
-                    remote_client=remote_client,
+                    remote_client=self._remote_client,
                     auto_detect=settings.remote_auto_detect,
+                    remote_client_factory=self._get_remote_client,
                 )
             )
         else:
@@ -354,12 +354,12 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         command_parser = CommandParser(config)
         base_keyboard = MacOSKeyboardSender(use_clipboard=settings.use_clipboard)
         keyboard_sender: FocusAwareKeyboardSender | RemoteAwareKeyboardSender
-        remote_client = self._get_remote_client() if settings.remote_enabled else None
-        if remote_client is not None:
+        if settings.remote_enabled:
             keyboard_sender = RemoteAwareKeyboardSender(
                 local_sender=base_keyboard,
-                remote_client=remote_client,
+                remote_client=self._remote_client,
                 auto_detect=settings.remote_auto_detect,
+                remote_client_factory=self._get_remote_client,
             )
         else:
             keyboard_sender = FocusAwareKeyboardSender(keyboard_sender=base_keyboard)
