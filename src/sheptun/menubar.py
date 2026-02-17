@@ -1,6 +1,7 @@
 import importlib.resources
 import logging
 import threading
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -158,7 +159,7 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         self._hotkey_manager.start()
         self._subscribe_to_wake_notifications()
         if settings.remote_enabled:
-            self._subscribe_to_app_activation()
+            self._start_uc_polling()
         self._start_remote_services()
 
     def _start_remote_services(self) -> None:
@@ -467,39 +468,29 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
             self._engine.stop()
             self._engine.start()
 
-    def _subscribe_to_app_activation(self) -> None:
-        try:
-            import AppKit
+    def _start_uc_polling(self) -> None:
+        """Poll frontmost app to detect Universal Control state changes."""
 
-            NSWorkspace = getattr(AppKit, "NSWorkspace")  # noqa: B009
-            NSWorkspaceDidActivateApplicationNotification = getattr(  # noqa: B009
-                AppKit, "NSWorkspaceDidActivateApplicationNotification"
-            )
-            center = NSWorkspace.sharedWorkspace().notificationCenter()
-            center.addObserver_selector_name_object_(
-                self,
-                "onAppActivated:",
-                NSWorkspaceDidActivateApplicationNotification,
-                None,
-            )
-            logger.info("Subscribed to app activation notifications")
-        except Exception as e:
-            logger.warning(f"Failed to subscribe to app activation: {e}")
+        def poll() -> None:
+            from sheptun.remote import is_cursor_on_local_screen
 
-    def onAppActivated_(self, notification: Any) -> None:
-        from sheptun.remote import UC_BUNDLE_ID
+            while True:
+                try:
+                    is_local = is_cursor_on_local_screen()
+                    was_uc = self._uc_active
+                    self._uc_active = not is_local
 
-        try:
-            app = notification.userInfo().get("NSWorkspaceApplicationKey")
-            bundle_id = str(app.bundleIdentifier() or "") if app else ""
-            was_uc = self._uc_active
-            self._uc_active = bundle_id == UC_BUNDLE_ID
+                    if self._uc_active != was_uc:
+                        logger.info(f"UC active: {self._uc_active}")
+                        self._refresh_icon()
+                except Exception as e:
+                    logger.debug(f"UC polling error: {e}")
 
-            if self._uc_active != was_uc:
-                logger.info(f"UC active: {self._uc_active}")
-                self._refresh_icon()
-        except Exception as e:
-            logger.debug(f"App activation handler error: {e}")
+                time.sleep(1.0)
+
+        thread = threading.Thread(target=poll, daemon=True)
+        thread.start()
+        logger.info("UC polling started")
 
     def _refresh_icon(self) -> None:
         """Re-apply current icon with UC state taken into account."""
@@ -515,21 +506,25 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
 
     def _on_remote_receive(self) -> None:
         """Called by RemoteServer when text is received from remote."""
-        with self._state_lock:
-            state = self._state
+        try:
+            with self._state_lock:
+                state = self._state
 
-        if state in (AppState.RECORDING_TOGGLE, AppState.RECORDING_PTT):
-            receive_icon = self._icon_receive_listening
-        else:
-            receive_icon = self._icon_receive_idle
+            if state in (AppState.RECORDING_TOGGLE, AppState.RECORDING_PTT):
+                receive_icon = self._icon_receive_listening
+            else:
+                receive_icon = self._icon_receive_idle
 
-        self._run_on_main_thread(lambda: setattr(self, "icon", receive_icon))
+            logger.info("Remote receive: showing receive icon")
+            self._run_on_main_thread(lambda: setattr(self, "icon", receive_icon))
 
-        if self._receive_timer is not None:
-            self._receive_timer.cancel()
-        self._receive_timer = threading.Timer(0.5, self._refresh_icon)
-        self._receive_timer.daemon = True
-        self._receive_timer.start()
+            if self._receive_timer is not None:
+                self._receive_timer.cancel()
+            self._receive_timer = threading.Timer(0.5, self._refresh_icon)
+            self._receive_timer.daemon = True
+            self._receive_timer.start()
+        except Exception as e:
+            logger.warning(f"Remote receive icon error: {e}")
 
     def _restart(self, _: Any) -> None:
         import os

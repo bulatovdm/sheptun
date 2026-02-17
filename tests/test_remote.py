@@ -104,6 +104,52 @@ class TestRemoteServer:
     def test_default_port(self) -> None:
         assert DEFAULT_PORT == 7849
 
+    def test_on_receive_callback_called(self) -> None:
+        keyboard = MagicMock()
+        callback = MagicMock()
+        server, port = _start_test_server(token="", keyboard=keyboard, on_receive=callback)
+        try:
+            client = RemoteClient("127.0.0.1", port)
+            client.send_text("hello")
+            callback.assert_called_once()
+        finally:
+            server.shutdown()
+
+    def test_on_receive_called_for_key(self) -> None:
+        keyboard = MagicMock()
+        callback = MagicMock()
+        server, port = _start_test_server(token="", keyboard=keyboard, on_receive=callback)
+        try:
+            client = RemoteClient("127.0.0.1", port)
+            client.send_key("enter")
+            callback.assert_called_once()
+        finally:
+            server.shutdown()
+
+    def test_on_receive_called_for_hotkey(self) -> None:
+        keyboard = MagicMock()
+        callback = MagicMock()
+        server, port = _start_test_server(token="", keyboard=keyboard, on_receive=callback)
+        try:
+            client = RemoteClient("127.0.0.1", port)
+            client.send_hotkey(["cmd", "v"])
+            callback.assert_called_once()
+        finally:
+            server.shutdown()
+
+    def test_on_receive_not_called_when_busy(self) -> None:
+        keyboard = MagicMock()
+        callback = MagicMock()
+        server, port = _start_test_server(
+            token="", keyboard=keyboard, is_busy=lambda: True, on_receive=callback
+        )
+        try:
+            client = RemoteClient("127.0.0.1", port)
+            client.send_text("hello")
+            callback.assert_not_called()
+        finally:
+            server.shutdown()
+
 
 class TestRemoteAwareKeyboardSender:
     def test_local_when_cursor_on_screen(self) -> None:
@@ -183,15 +229,46 @@ class TestRemoteAwareKeyboardSender:
             local.start_capture.assert_called_once()
             local.end_capture.assert_called_once()
 
+    def test_remote_client_factory_lazy_resolution(self) -> None:
+        from sheptun.keyboard import RemoteAwareKeyboardSender
+
+        local = MagicMock()
+        remote = MagicMock()
+        remote.send_text.return_value = True
+        factory = MagicMock(return_value=remote)
+
+        with patch("sheptun.remote.is_cursor_on_local_screen", return_value=False):
+            sender = RemoteAwareKeyboardSender(
+                local, remote_client=None, auto_detect=True, remote_client_factory=factory
+            )
+            sender.send_text("hello")
+            factory.assert_called_once()
+            remote.send_text.assert_called_once_with("hello")
+
+    def test_remote_client_factory_none_falls_back_to_local(self) -> None:
+        from sheptun.keyboard import RemoteAwareKeyboardSender
+
+        local = MagicMock()
+        factory = MagicMock(return_value=None)
+
+        with patch("sheptun.remote.is_cursor_on_local_screen", return_value=False):
+            sender = RemoteAwareKeyboardSender(
+                local, remote_client=None, auto_detect=True, remote_client_factory=factory
+            )
+            sender.send_text("hello")
+            factory.assert_called_once()
+            local.send_text.assert_called_once_with("hello")
+
 
 def _start_test_server(
     token: str = "",
     keyboard: Any = None,
     is_busy: Any = None,
+    on_receive: Any = None,
 ) -> tuple[RemoteHTTPServer, int]:
     if keyboard is None:
         keyboard = MagicMock()
-    server = RemoteHTTPServer(0, keyboard, token, is_busy)
+    server = RemoteHTTPServer(0, keyboard, token, is_busy, on_receive)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     time.sleep(0.1)
