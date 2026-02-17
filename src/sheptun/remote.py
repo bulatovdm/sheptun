@@ -17,24 +17,22 @@ BONJOUR_SERVICE_TYPE = "_sheptun._tcp."
 BONJOUR_SERVICE_NAME = "Sheptun"
 
 
+UC_BUNDLE_ID = "com.apple.universalcontrol"
+
+
 def is_cursor_on_local_screen() -> bool:
-    """Check if the mouse cursor is within any local display bounds."""
+    """Check if the cursor is on a local screen (not on a Universal Control remote)."""
     try:
         import AppKit
 
-        NSEvent: Any = getattr(AppKit, "NSEvent")  # noqa: B009
-        NSScreen: Any = getattr(AppKit, "NSScreen")  # noqa: B009
-        NSPointInRect: Any = getattr(AppKit, "NSPointInRect")  # noqa: B009
+        NSWorkspace: Any = getattr(AppKit, "NSWorkspace")  # noqa: B009
+        frontmost = NSWorkspace.sharedWorkspace().frontmostApplication()
+        if frontmost is not None:
+            bundle_id = str(frontmost.bundleIdentifier() or "")
+            if bundle_id == UC_BUNDLE_ID:
+                return False
 
-        mouse_location = NSEvent.mouseLocation()
-        screens = NSScreen.screens()
-
-        for screen in screens:
-            frame = screen.frame()
-            if NSPointInRect(mouse_location, frame):
-                return True
-
-        return False
+        return True
     except Exception as e:
         logger.debug(f"Cursor detection failed: {e}")
         return True  # Safe default: assume local
