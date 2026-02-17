@@ -1,66 +1,111 @@
 """One-time script to generate remote status icons for menubar."""
 
 from pathlib import Path
+from typing import Any
 
 from PIL import Image, ImageDraw
 
 RESOURCES = Path(__file__).parent
 SIZES = {"": 50, "@2x": 100}
+SUPERSAMPLE = 4  # Draw at 4x then downscale for anti-aliasing
 
 
 def draw_arrow_up(draw: ImageDraw.ImageDraw, cx: int, cy: int, size: int) -> None:
-    """Draw an upward arrow (↑) for remote send."""
-    half = size // 2
-    tip_y = cy - half
-    base_y = cy + half
-    # Arrow head
-    draw.polygon(
-        [(cx, tip_y), (cx - half, cy - half // 3), (cx + half, cy - half // 3)],
+    """Draw a rounded upward arrow (↑) for remote send."""
+    stroke = max(size // 6, 2)
+    half_h = size  # Tall arrow with long shaft
+    half_w = size * 3 // 8  # Compact chevron head
+
+    # Chevron head (two rounded lines forming a V pointing up)
+    head_y = cy - half_h // 2
+    draw.line(
+        [(cx - half_w, head_y + half_w), (cx, head_y)],
         fill="black",
+        width=stroke,
+        joint="curve",
     )
-    # Arrow shaft
-    shaft_w = size // 4
-    draw.rectangle(
-        [cx - shaft_w, cy - half // 3, cx + shaft_w, base_y],
+    draw.line(
+        [(cx, head_y), (cx + half_w, head_y + half_w)],
         fill="black",
+        width=stroke,
+        joint="curve",
     )
+    # Round caps at ends
+    r = stroke // 2
+    draw.ellipse([cx - half_w - r, head_y + half_w - r, cx - half_w + r, head_y + half_w + r], fill="black")
+    draw.ellipse([cx + half_w - r, head_y + half_w - r, cx + half_w + r, head_y + half_w + r], fill="black")
+    draw.ellipse([cx - r, head_y - r, cx + r, head_y + r], fill="black")
+
+    # Shaft (vertical line with round caps)
+    shaft_top = head_y
+    shaft_bottom = cy + half_h // 2
+    draw.line(
+        [(cx, shaft_top), (cx, shaft_bottom)],
+        fill="black",
+        width=stroke,
+    )
+    draw.ellipse([cx - r, shaft_bottom - r, cx + r, shaft_bottom + r], fill="black")
 
 
 def draw_arrow_down(draw: ImageDraw.ImageDraw, cx: int, cy: int, size: int) -> None:
-    """Draw a downward arrow (↓) for remote receive."""
-    half = size // 2
-    tip_y = cy + half
-    base_y = cy - half
-    # Arrow head
-    draw.polygon(
-        [(cx, tip_y), (cx - half, cy + half // 3), (cx + half, cy + half // 3)],
+    """Draw a rounded downward arrow (↓) for remote receive."""
+    stroke = max(size // 6, 2)
+    half_h = size  # Tall arrow with long shaft
+    half_w = size * 3 // 8  # Compact chevron head
+
+    # Chevron head (two rounded lines forming a V pointing down)
+    head_y = cy + half_h // 2
+    draw.line(
+        [(cx - half_w, head_y - half_w), (cx, head_y)],
         fill="black",
+        width=stroke,
+        joint="curve",
     )
-    # Arrow shaft
-    shaft_w = size // 4
-    draw.rectangle(
-        [cx - shaft_w, base_y, cx + shaft_w, cy + half // 3],
+    draw.line(
+        [(cx, head_y), (cx + half_w, head_y - half_w)],
         fill="black",
+        width=stroke,
+        joint="curve",
     )
+    # Round caps at ends
+    r = stroke // 2
+    draw.ellipse([cx - half_w - r, head_y - half_w - r, cx - half_w + r, head_y - half_w + r], fill="black")
+    draw.ellipse([cx + half_w - r, head_y - half_w - r, cx + half_w + r, head_y - half_w + r], fill="black")
+    draw.ellipse([cx - r, head_y - r, cx + r, head_y + r], fill="black")
+
+    # Shaft (vertical line with round caps)
+    shaft_top = cy - half_h // 2
+    shaft_bottom = head_y
+    draw.line(
+        [(cx, shaft_top), (cx, shaft_bottom)],
+        fill="black",
+        width=stroke,
+    )
+    draw.ellipse([cx - r, shaft_top - r, cx + r, shaft_top + r], fill="black")
 
 
 def generate_icon(
-    base_name: str, output_name: str, arrow_fn: type(draw_arrow_up)
+    base_name: str, output_name: str, arrow_fn: Any,
 ) -> None:
     for suffix, size in SIZES.items():
         base_path = RESOURCES / f"{base_name}{suffix}.png"
         base_img = Image.open(base_path).convert("RGBA")
 
-        overlay = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
+        # Draw arrow at supersampled resolution for smooth edges
+        ss = size * SUPERSAMPLE
+        overlay_ss = Image.new("RGBA", (ss, ss), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay_ss)
 
-        # Arrow in bottom-right corner
-        arrow_size = size // 5
-        margin = size // 10
-        cx = size - margin - arrow_size // 2
-        cy = size - margin - arrow_size // 2
+        # Arrow in bottom-right corner, slightly larger
+        arrow_size = int(size * 0.22 * SUPERSAMPLE)
+        margin = int(size * 0.08 * SUPERSAMPLE)
+        cx = ss - margin - arrow_size // 2
+        cy = ss - margin - arrow_size // 2
 
         arrow_fn(draw, cx, cy, arrow_size)
+
+        # Downscale with LANCZOS for anti-aliasing
+        overlay = overlay_ss.resize((size, size), Image.Resampling.LANCZOS)
 
         result = Image.alpha_composite(base_img, overlay)
         out_path = RESOURCES / f"{output_name}{suffix}.png"
