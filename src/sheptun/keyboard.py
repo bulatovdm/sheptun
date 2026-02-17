@@ -1,7 +1,12 @@
+from __future__ import annotations
+
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from sheptun.remote import RemoteClient
 
 import AppKit
 import Quartz
@@ -322,6 +327,66 @@ class FocusAwareKeyboardSender:
 
     def get_cursor_position(self) -> int:
         return self._keyboard.get_cursor_position()
+
+
+class RemoteAwareKeyboardSender:
+    """Routes keyboard actions to local or remote machine based on cursor position."""
+
+    def __init__(
+        self,
+        local_sender: MacOSKeyboardSender,
+        remote_client: RemoteClient,
+        auto_detect: bool = True,
+    ) -> None:
+        from sheptun.remote import is_cursor_on_local_screen
+
+        self._local = local_sender
+        self._remote = remote_client
+        self._auto_detect = auto_detect
+        self._is_cursor_on_local_screen = is_cursor_on_local_screen
+        self._force_remote = False
+
+    @property
+    def force_remote(self) -> bool:
+        return self._force_remote
+
+    @force_remote.setter
+    def force_remote(self, value: bool) -> None:
+        self._force_remote = value
+
+    def _is_remote(self) -> bool:
+        if self._force_remote:
+            return True
+        if self._auto_detect:
+            return not self._is_cursor_on_local_screen()
+        return False
+
+    def send_text(self, text: str) -> None:
+        if self._is_remote() and self._remote.send_text(text):
+            return
+        self._local.send_text(text)
+
+    def send_key(self, key: str) -> None:
+        if self._is_remote() and self._remote.send_key(key):
+            return
+        self._local.send_key(key)
+
+    def send_hotkey(self, keys: list[str]) -> None:
+        if self._is_remote() and self._remote.send_hotkey(keys):
+            return
+        self._local.send_hotkey(keys)
+
+    def start_capture(self) -> None:
+        self._local.start_capture()
+
+    def end_capture(self) -> None:
+        self._local.end_capture()
+
+    def has_text_before_cursor(self) -> bool:
+        return self._local.has_text_before_cursor()
+
+    def get_cursor_position(self) -> int:
+        return self._local.get_cursor_position()
 
 
 def _get_cursor_position() -> int:

@@ -12,10 +12,14 @@ from sheptun.config import get_config_path
 from sheptun.engine import BaseVoiceEngine
 from sheptun.hotkeys import HotkeyManager
 from sheptun.i18n import t
-from sheptun.keyboard import FocusAwareKeyboardSender, MacOSKeyboardSender
+from sheptun.keyboard import (
+    FocusAwareKeyboardSender,
+    MacOSKeyboardSender,
+    RemoteAwareKeyboardSender,
+)
 from sheptun.recognition import WhisperRecognizer
 from sheptun.settings import settings, setup_logging
-from sheptun.types import AppState, SpeechRecognizer
+from sheptun.types import AppState, KeyboardSender, SpeechRecognizer
 
 setup_logging()
 logger = logging.getLogger("sheptun.menubar")
@@ -71,7 +75,7 @@ class MenubarVoiceEngine(BaseVoiceEngine):
         self,
         recognizer: SpeechRecognizer,
         command_parser: CommandParser,
-        keyboard_sender: FocusAwareKeyboardSender | MacOSKeyboardSender,
+        keyboard_sender: KeyboardSender,
         status_indicator: MenubarStatusIndicator,
         audio_config: AudioConfig | None = None,
         vad_config: VoiceActivityConfig | None = None,
@@ -99,7 +103,10 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         self._state = AppState.IDLE
         self._state_lock = threading.Lock()
         self._ptt_recorder: AudioRecorder | None = None
-        self._ptt_keyboard: FocusAwareKeyboardSender | None = None
+        self._ptt_keyboard: KeyboardSender | None = None
+        self._remote_server: Any = None
+        self._remote_discovery: Any = None
+        self._remote_client: Any = None
 
         self._icon_idle = _get_icon_path("mic_idle.png")
         self._icon_listening = _get_icon_path("mic_active.png")
@@ -123,15 +130,78 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         )
         self._ptt_menu_item = rumps.MenuItem(f"{t('menu_ptt')} ({ptt_display})")
 
-        self.menu = [
+        menu_items: list[Any] = [
             self._toggle_menu_item,
             self._ptt_menu_item,
             None,
-            rumps.MenuItem(t("menu_restart"), callback=self._restart),
-            rumps.MenuItem(t("menu_quit"), callback=self._quit),
         ]
+
+        if settings.remote_enabled:
+            self._remote_status_item = rumps.MenuItem(t("menu_remote_status"))
+            menu_items.append(self._remote_status_item)
+            menu_items.append(None)
+
+        menu_items.extend(
+            [
+                rumps.MenuItem(t("menu_restart"), callback=self._restart),
+                rumps.MenuItem(t("menu_quit"), callback=self._quit),
+            ]
+        )
+        self.menu = menu_items
+
         self._hotkey_manager.start()
         self._subscribe_to_wake_notifications()
+        self._start_remote_services()
+
+    def _start_remote_services(self) -> None:
+        if settings.remote_serve:
+            from sheptun.remote import RemoteServer
+
+            keyboard = MacOSKeyboardSender(use_clipboard=settings.use_clipboard)
+            self._remote_server = RemoteServer(
+                keyboard_sender=keyboard,
+                port=settings.remote_port,
+                token=settings.remote_token,
+                is_busy=lambda: self._state != AppState.IDLE,
+            )
+            self._remote_server.start()
+            logger.info(f"Remote server started on port {settings.remote_port}")
+
+        if settings.remote_enabled:
+            self._init_remote_client()
+
+    def _init_remote_client(self) -> None:
+        from sheptun.remote import RemoteClient
+
+        if settings.remote_host:
+            self._remote_client = RemoteClient(
+                host=settings.remote_host,
+                port=settings.remote_port,
+                token=settings.remote_token,
+            )
+            logger.info(f"Remote client configured: {settings.remote_host}:{settings.remote_port}")
+        else:
+            from sheptun.remote import RemoteDiscovery
+
+            self._remote_discovery = RemoteDiscovery()
+            self._remote_discovery.start()
+            logger.info("Bonjour discovery started, waiting for remote servers")
+
+    def _get_remote_client(self) -> Any:
+        if self._remote_client is not None:
+            return self._remote_client
+        if self._remote_discovery is not None:
+            host_info = self._remote_discovery.first_host
+            if host_info is not None:
+                from sheptun.remote import RemoteClient
+
+                hostname, port = host_info
+                self._remote_client = RemoteClient(
+                    host=hostname, port=port, token=settings.remote_token
+                )
+                logger.info(f"Auto-discovered remote: {hostname}:{port}")
+                return self._remote_client
+        return None
 
     def _run_on_main_thread(self, func: Callable[[], None]) -> None:
         """Schedule a function to run on the main thread via NSOperationQueue."""
@@ -165,7 +235,16 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
             self._ptt_recorder = AudioRecorder()
 
         if self._ptt_keyboard is None:
-            self._ptt_keyboard = FocusAwareKeyboardSender()
+            base_keyboard = MacOSKeyboardSender(use_clipboard=settings.use_clipboard)
+            remote_client = self._get_remote_client() if settings.remote_enabled else None
+            if remote_client is not None:
+                self._ptt_keyboard = RemoteAwareKeyboardSender(
+                    local_sender=base_keyboard,
+                    remote_client=remote_client,
+                    auto_detect=settings.remote_auto_detect,
+                )
+            else:
+                self._ptt_keyboard = FocusAwareKeyboardSender(keyboard_sender=base_keyboard)
 
         self._ptt_keyboard.start_capture()
         self._set_icon(self._icon_listening)
@@ -211,9 +290,23 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
             self._set_state(AppState.IDLE)
             self._set_icon(self._icon_idle)
             self._end_ptt_capture()
+            self._restore_engine_keyboard()
+
+    def _restore_engine_keyboard(self) -> None:
+        if self._engine is None:
+            return
+        base_keyboard = MacOSKeyboardSender(use_clipboard=settings.use_clipboard)
+        remote_client = self._get_remote_client() if settings.remote_enabled else None
+        if remote_client is not None:
             self._engine.set_keyboard_sender(
-                MacOSKeyboardSender(use_clipboard=settings.use_clipboard)
+                RemoteAwareKeyboardSender(
+                    local_sender=base_keyboard,
+                    remote_client=remote_client,
+                    auto_detect=settings.remote_auto_detect,
+                )
             )
+        else:
+            self._engine.set_keyboard_sender(base_keyboard)
 
     def _end_ptt_capture(self) -> None:
         if self._ptt_keyboard is not None:
@@ -260,7 +353,16 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
 
         command_parser = CommandParser(config)
         base_keyboard = MacOSKeyboardSender(use_clipboard=settings.use_clipboard)
-        keyboard_sender = FocusAwareKeyboardSender(keyboard_sender=base_keyboard)
+        keyboard_sender: FocusAwareKeyboardSender | RemoteAwareKeyboardSender
+        remote_client = self._get_remote_client() if settings.remote_enabled else None
+        if remote_client is not None:
+            keyboard_sender = RemoteAwareKeyboardSender(
+                local_sender=base_keyboard,
+                remote_client=remote_client,
+                auto_detect=settings.remote_auto_detect,
+            )
+        else:
+            keyboard_sender = FocusAwareKeyboardSender(keyboard_sender=base_keyboard)
         status_indicator = MenubarStatusIndicator(self)
 
         self._engine = MenubarVoiceEngine(
@@ -359,6 +461,10 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
     def _quit(self, _: Any) -> None:
         if self._engine is not None:
             self._engine.stop()
+        if self._remote_server is not None:
+            self._remote_server.stop()
+        if self._remote_discovery is not None:
+            self._remote_discovery.stop()
         self._hotkey_manager.stop()
         rumps.quit_application()  # type: ignore[no-untyped-call]
 

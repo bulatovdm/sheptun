@@ -109,6 +109,13 @@ class Settings:
     verify_model: str | None = _get_optional_str("SHEPTUN_VERIFY_MODEL")
     # Parallel requests for verification (1 = sequential)
     verify_concurrency: int = int(_get_float("SHEPTUN_VERIFY_CONCURRENCY", 1))
+    # Remote text delivery
+    remote_enabled: bool = _get_bool("SHEPTUN_REMOTE_ENABLED", False)
+    remote_serve: bool = _get_bool("SHEPTUN_REMOTE_SERVE", False)
+    remote_host: str | None = _get_optional_str("SHEPTUN_REMOTE_HOST")
+    remote_port: int = int(_get_float("SHEPTUN_REMOTE_PORT", 7849))
+    remote_token: str = _get_str("SHEPTUN_REMOTE_TOKEN", "")
+    remote_auto_detect: bool = _get_bool("SHEPTUN_REMOTE_AUTO_DETECT", True)
     # Fine-tuning
     finetune_model: str = _get_str("SHEPTUN_FINETUNE_MODEL", "large")
     finetune_method: str = _get_str("SHEPTUN_FINETUNE_METHOD", "lora")

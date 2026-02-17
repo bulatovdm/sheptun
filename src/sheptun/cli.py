@@ -827,6 +827,85 @@ def finetune_eval(
 
 
 @app.command()
+def serve(
+    port: Annotated[
+        int | None,
+        typer.Option("--port", "-p", help="Порт сервера"),
+    ] = None,
+    token: Annotated[
+        str | None,
+        typer.Option("--token", help="Токен авторизации"),
+    ] = None,
+) -> None:
+    """Запустить сервер для приёма текста с удалённой машины."""
+    from sheptun.keyboard import MacOSKeyboardSender
+    from sheptun.remote import RemoteServer
+
+    server_port = port or settings.remote_port
+    server_token = token or settings.remote_token
+
+    keyboard = MacOSKeyboardSender(use_clipboard=settings.use_clipboard)
+    server = RemoteServer(
+        keyboard_sender=keyboard,
+        port=server_port,
+        token=server_token,
+    )
+
+    _success(f"Сервер запущен на порту {server_port}")
+    _hint("Нажмите Ctrl+C для остановки")
+    server.start_blocking()
+
+
+@app.command()
+def remote_test(
+    host: Annotated[
+        str | None,
+        typer.Argument(help="Хост удалённой машины (например, macbook.local)"),
+    ] = None,
+    port: Annotated[
+        int | None,
+        typer.Option("--port", "-p", help="Порт сервера"),
+    ] = None,
+    token: Annotated[
+        str | None,
+        typer.Option("--token", help="Токен авторизации"),
+    ] = None,
+    text: Annotated[
+        str,
+        typer.Option("--text", "-t", help="Текст для отправки"),
+    ] = "Привет от Шептуна!",
+) -> None:
+    """Проверить подключение к удалённому серверу."""
+    from sheptun.remote import RemoteClient
+
+    remote_host = host or settings.remote_host
+    if not remote_host:
+        _error("Укажите хост: sheptun remote-test macbook.local")
+        _hint("Или задайте SHEPTUN_REMOTE_HOST в .env")
+        raise typer.Exit(1)
+
+    remote_port = port or settings.remote_port
+    remote_token = token or settings.remote_token
+
+    client = RemoteClient(host=remote_host, port=remote_port, token=remote_token)
+
+    _info(f"Проверка подключения к {remote_host}:{remote_port}...")
+    result = client.ping()
+    if result is None:
+        _error(f"Не удалось подключиться к {remote_host}:{remote_port}")
+        raise typer.Exit(1)
+
+    _success(f"Подключение установлено: {result.get('hostname', 'unknown')}")
+
+    _info(f"Отправка текста: '{text}'")
+    if client.send_text(text):
+        _success("Текст отправлен")
+    else:
+        _error("Не удалось отправить текст")
+        raise typer.Exit(1)
+
+
+@app.command()
 def enable_autostart() -> None:
     """Включить автозапуск Sheptun при старте системы."""
     import subprocess

@@ -9,6 +9,9 @@ MESSAGES = {
     "notification_error": "Ошибка",
     "help_commands": "энтер, таб, эскейп, пробел, вверх, вниз, влево, вправо, удали, клир, стоп",
     "help_title": "Sheptun - Команды",
+    "menu_remote_status": "Remote: поиск...",
+    "menu_remote_connected": "Remote: {host}",
+    "menu_remote_disconnected": "Remote: не подключён",
 }
 
 

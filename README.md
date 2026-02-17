@@ -38,6 +38,10 @@ sheptun list-models         # Показать загруженные модел
 sheptun cleanup-models      # Удалить неиспользуемые модели
 sheptun clear-dataset       # Очистить датасет для fine-tuning
 
+# Remote-ввод (Universal Control)
+sheptun serve               # Запустить remote-сервер (приёмник)
+sheptun remote-test         # Проверить подключение к remote
+
 # Верификация транскрипций
 sheptun verify-dataset      # Верифицировать транскрипции через Claude
 sheptun verify-dataset -n 10  # Тест на 10 записях
@@ -126,6 +130,14 @@ SHEPTUN_KEY_DELAY=0.02            # Задержка между событиям
 
 # Производительность
 SHEPTUN_WARMUP_INTERVAL=120       # Интервал прогрева модели (сек), 0 — отключить
+
+# Remote-ввод (Universal Control)
+SHEPTUN_REMOTE_ENABLED=false      # Включить отправку текста на remote
+SHEPTUN_REMOTE_SERVE=false        # Принимать текст от remote (режим сервера)
+SHEPTUN_REMOTE_HOST=              # Хост remote-сервера (пусто — Bonjour)
+SHEPTUN_REMOTE_PORT=7849          # Порт remote-сервера
+SHEPTUN_REMOTE_TOKEN=             # Shared secret для авторизации
+SHEPTUN_REMOTE_AUTO_DETECT=true   # Автоопределение по позиции курсора
 ```
 
 ## Движки распознавания
@@ -300,6 +312,59 @@ SHEPTUN_VERIFY_MODEL=claude-haiku-4-5-20251001
 ```
 
 Результаты хранятся в SQLite (`dataset/verification.db`) — поддерживает инкрементальную обработку и возобновление после прерывания.
+
+## Remote-ввод (Universal Control)
+
+Sheptun поддерживает передачу текста между Mac-ами. Это полезно при использовании Universal Control: Mac Studio распознаёт речь и отправляет текст на MacBook, где курсор.
+
+### Как это работает
+
+1. **Mac Studio** (распознавание) — определяет позицию курсора. Если курсор за пределами локальных экранов (ушёл на MacBook через Universal Control), текст отправляется по HTTP на MacBook.
+2. **MacBook** (приёмник) — запускает `sheptun serve`, принимает текст и вводит его через CGEvent/clipboard как обычно.
+3. **Обнаружение** — MacBook рекламирует себя через Bonjour (`_sheptun._tcp`), Mac Studio находит его автоматически.
+4. **Конфликты** — если на MacBook идёт локальная запись (PTT/Toggle), сервер отклоняет входящий текст (HTTP 409), и Mac Studio вводит его локально.
+
+### Настройка
+
+**Mac Studio** (отправитель) — `.env`:
+
+```bash
+SHEPTUN_REMOTE_ENABLED=true          # Включить отправку на remote
+SHEPTUN_REMOTE_TOKEN=my-secret       # Общий токен авторизации
+SHEPTUN_REMOTE_AUTO_DETECT=true      # Автоопределение по позиции курсора
+# SHEPTUN_REMOTE_HOST=              # Явный хост (если без Bonjour)
+# SHEPTUN_REMOTE_PORT=7849          # Порт (по умолчанию 7849)
+```
+
+**MacBook** (приёмник) — `.env`:
+
+```bash
+SHEPTUN_REMOTE_SERVE=true            # Принимать текст от remote
+SHEPTUN_REMOTE_TOKEN=my-secret       # Тот же токен
+```
+
+### CLI-команды
+
+```bash
+# На MacBook — запустить сервер в foreground (для отладки)
+sheptun serve
+sheptun serve --port 7849 --token my-secret
+
+# На Mac Studio — проверить подключение
+sheptun remote-test                      # Bonjour-обнаружение
+sheptun remote-test macbook.local        # По имени хоста
+sheptun remote-test 192.168.1.42         # По IP
+```
+
+### Сценарии
+
+| Ситуация | Поведение |
+|----------|-----------|
+| Курсор на Mac Studio | Текст вводится локально |
+| Курсор на MacBook (UC) | Текст отправляется на MacBook |
+| MacBook записывает голос | Remote отклонён → текст вводится локально |
+| MacBook ушёл из сети | Bonjour-сервис пропал → текст вводится локально |
+| MacBook отдельно (без UC) | Оба Sheptun работают независимо |
 
 ## Fine-tuning Whisper
 
