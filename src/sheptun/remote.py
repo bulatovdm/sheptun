@@ -313,7 +313,6 @@ class RemoteDiscovery:
 
             NSNetServiceBrowser: Any = getattr(Foundation, "NSNetServiceBrowser")  # noqa: B009
             NSObject: Any = getattr(Foundation, "NSObject")  # noqa: B009
-            NSRunLoop: Any = getattr(Foundation, "NSRunLoop")  # noqa: B009
 
             discovery = self
 
@@ -344,11 +343,6 @@ class RemoteDiscovery:
             self._browser = NSNetServiceBrowser.alloc().init()
             self._browser.setDelegate_(self._delegate)
             self._browser.searchForServicesOfType_inDomain_(BONJOUR_SERVICE_TYPE, "")
-
-            # Run the run loop briefly to process initial results
-            NSRunLoop.currentRunLoop().runUntilDate_(
-                NSRunLoop.currentRunLoop().limitDateForMode_("NSDefaultRunLoopMode")
-            )
             logger.info("Bonjour discovery started")
         except Exception as e:
             logger.warning(f"Failed to start Bonjour discovery: {e}")
