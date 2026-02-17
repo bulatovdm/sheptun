@@ -20,6 +20,18 @@ BONJOUR_SERVICE_NAME = "Sheptun"
 UC_BUNDLE_ID = "com.apple.universalcontrol"
 
 
+def _resolve_to_ip(hostname: str, port: int) -> str:
+    """Resolve a .local hostname to an IPv4 address to avoid slow mDNS lookups."""
+    try:
+        results = socket.getaddrinfo(hostname, port, socket.AF_INET)
+        if results:
+            addr = results[0][4]
+            return str(addr[0])
+    except socket.gaierror:
+        pass
+    return hostname
+
+
 def is_cursor_on_local_screen() -> bool:
     """Check if the cursor is on a local screen (not on a Universal Control remote)."""
     try:
@@ -329,9 +341,11 @@ class RemoteDiscovery:
                     name = str(service.name())
                     hostname = str(service.hostName())
                     port = int(service.port())
+                    # Resolve to IP to avoid slow .local mDNS lookups on each request
+                    host = _resolve_to_ip(hostname, port)
                     with discovery._lock:
-                        discovery._hosts[name] = (hostname, port)
-                    logger.info(f"Discovered remote: {name} at {hostname}:{port}")
+                        discovery._hosts[name] = (host, port)
+                    logger.info(f"Discovered remote: {name} at {host}:{port}")
 
                 def netService_didNotResolve_(  # type: ignore[override]
                     self, service: Any, _error: Any
