@@ -32,6 +32,7 @@ def _create_menubar() -> SheptunMenubar:
         app._state = AppState.IDLE
         app._state_lock = threading.Lock()
         app._uc_active = False
+        app._uc_deactivate_timer = None
         app._receive_timer = None
         app._icon_idle = "/icons/mic_idle.png"
         app._icon_listening = "/icons/mic_active.png"
@@ -185,11 +186,15 @@ class TestUCNotificationDetection:
         app.onActiveAppChanged_(notification)
         assert app._uc_active is True
 
-    def test_uc_cleared_when_other_app_becomes_frontmost(self) -> None:
+    def test_uc_cleared_after_debounce(self) -> None:
         app = self._setup_app()
         app._uc_active = True
         notification = self._make_notification("com.apple.terminal")
+
         app.onActiveAppChanged_(notification)
+        assert app._uc_active is True  # still True, debounce pending
+
+        time.sleep(0.4)
         assert app._uc_active is False
 
     @patch.object(rumps.App, "icon", _test_icon_prop)
@@ -202,18 +207,21 @@ class TestUCNotificationDetection:
             app.onActiveAppChanged_(notification)
             assert app.icon == app._icon_remote_idle
 
-    @patch.object(rumps.App, "icon", _test_icon_prop)
-    def test_icon_reverts_when_local_app_detected(self) -> None:
+    def test_icon_reverts_after_debounce(self) -> None:
         app = self._setup_app()
         app._state = AppState.IDLE
         app._uc_active = True
+        refresh_calls: list[int] = []
+        app._refresh_icon = lambda: refresh_calls.append(1)  # type: ignore[assignment]
         notification = self._make_notification("com.apple.terminal")
 
-        with patch("sheptun.menubar.settings", remote_enabled=True):
-            app.onActiveAppChanged_(notification)
-            assert app.icon == app._icon_idle
+        app.onActiveAppChanged_(notification)
+        assert not refresh_calls  # not yet
 
-    def test_no_refresh_when_state_unchanged(self) -> None:
+        time.sleep(0.4)
+        assert refresh_calls  # fired after debounce
+
+    def test_no_refresh_when_already_inactive(self) -> None:
         app = self._setup_app()
         app._uc_active = False
         refresh_calls: list[int] = []
@@ -223,6 +231,54 @@ class TestUCNotificationDetection:
         app.onActiveAppChanged_(notification)
 
         assert not refresh_calls
+
+    def test_deactivation_is_debounced(self) -> None:
+        app = self._setup_app()
+        app._uc_active = True
+        notification = self._make_notification("com.apple.terminal")
+
+        app.onActiveAppChanged_(notification)
+
+        assert app._uc_active is True
+        assert app._uc_deactivate_timer is not None
+        app._uc_deactivate_timer.cancel()
+
+    def test_deactivation_fires_after_debounce(self) -> None:
+        app = self._setup_app()
+        app._uc_active = True
+        refresh_calls: list[int] = []
+        app._refresh_icon = lambda: refresh_calls.append(1)  # type: ignore[assignment]
+        notification = self._make_notification("com.apple.terminal")
+
+        app.onActiveAppChanged_(notification)
+        time.sleep(0.4)
+
+        assert app._uc_active is False
+        assert refresh_calls
+
+    def test_no_refresh_during_ptt_on_deactivate(self) -> None:
+        app = self._setup_app()
+        app._uc_active = True
+        app._state = AppState.RECORDING_PTT
+        refresh_calls: list[int] = []
+        app._refresh_icon = lambda: refresh_calls.append(1)  # type: ignore[assignment]
+
+        app._deactivate_uc()
+
+        assert app._uc_active is False
+        assert not refresh_calls
+
+    def test_activation_cancels_pending_deactivation(self) -> None:
+        app = self._setup_app()
+        app._uc_active = True
+
+        app.onActiveAppChanged_(self._make_notification("com.apple.terminal"))
+        assert app._uc_deactivate_timer is not None
+
+        app._uc_active = False
+        app.onActiveAppChanged_(self._make_notification("com.apple.universalcontrol"))
+        assert app._uc_deactivate_timer is None
+        assert app._uc_active is True
 
     def test_handles_none_user_info(self) -> None:
         app = self._setup_app()
@@ -290,3 +346,33 @@ class TestOnRemoteReceive:
             assert app._receive_timer is not None
             assert app._receive_timer.is_alive()
             app._receive_timer.cancel()
+
+
+class TestPTTIcon:
+    def _setup_app(self) -> "SheptunMenubar":
+        app = _create_menubar()
+        app._run_on_main_thread = lambda f: f()  # type: ignore[assignment]
+        app._ptt_recorder = MagicMock()
+        app._ptt_keyboard = MagicMock()
+        app._engine = MagicMock()
+        return app
+
+    @patch.object(rumps.App, "icon", _test_icon_prop)
+    def test_ptt_shows_remote_listening_when_uc_active(self) -> None:
+        app = self._setup_app()
+        app._state = AppState.IDLE
+        app._uc_active = True
+
+        with patch("sheptun.menubar.settings", remote_enabled=True, use_clipboard=False):
+            app._on_ptt_start()
+            assert app.icon == app._icon_remote_listening
+
+    @patch.object(rumps.App, "icon", _test_icon_prop)
+    def test_ptt_shows_regular_listening_when_uc_inactive(self) -> None:
+        app = self._setup_app()
+        app._state = AppState.IDLE
+        app._uc_active = False
+
+        with patch("sheptun.menubar.settings", remote_enabled=True, use_clipboard=False):
+            app._on_ptt_start()
+            assert app.icon == app._icon_listening

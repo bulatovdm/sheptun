@@ -116,6 +116,7 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         self._icon_receive_idle = _get_icon_path("mic_receive.png")
         self._icon_receive_listening = _get_icon_path("mic_receive_active.png")
         self._uc_active = False
+        self._uc_deactivate_timer: threading.Timer | None = None
         self._receive_timer: threading.Timer | None = None
         self.icon = self._icon_idle
 
@@ -498,13 +499,33 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
             if app_info is None:
                 return
             bundle_id = str(app_info.bundleIdentifier() or "")
-            was_uc = self._uc_active
-            self._uc_active = bundle_id == UC_BUNDLE_ID
-            if self._uc_active != was_uc:
-                logger.info(f"UC active: {self._uc_active}")
-                self._refresh_icon()
+            is_uc = bundle_id == UC_BUNDLE_ID
+
+            if is_uc:
+                if self._uc_deactivate_timer is not None:
+                    self._uc_deactivate_timer.cancel()
+                    self._uc_deactivate_timer = None
+                if not self._uc_active:
+                    self._uc_active = True
+                    logger.info("UC active: True")
+                    self._refresh_icon()
+            elif self._uc_active:
+                if self._uc_deactivate_timer is not None:
+                    self._uc_deactivate_timer.cancel()
+                self._uc_deactivate_timer = threading.Timer(0.3, self._deactivate_uc)
+                self._uc_deactivate_timer.daemon = True
+                self._uc_deactivate_timer.start()
         except Exception as e:
             logger.debug(f"UC activation notification error: {e}")
+
+    def _deactivate_uc(self) -> None:
+        self._uc_active = False
+        self._uc_deactivate_timer = None
+        logger.info("UC active: False")
+        with self._state_lock:
+            state = self._state
+        if state != AppState.RECORDING_PTT:
+            self._refresh_icon()
 
     def _refresh_icon(self) -> None:
         """Re-apply current icon with UC state taken into account."""

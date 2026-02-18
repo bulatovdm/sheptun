@@ -8,6 +8,7 @@ from sheptun.remote import (
     RemoteClient,
     RemoteHTTPServer,
     RemoteServer,
+    is_cursor_on_local_screen,
 )
 
 
@@ -149,6 +150,35 @@ class TestRemoteServer:
             callback.assert_not_called()
         finally:
             server.shutdown()
+
+
+class TestIsCursorOnLocalScreen:
+    def _make_appkit(self, bundle_id: str) -> Any:
+        app = MagicMock()
+        app.bundleIdentifier.return_value = bundle_id
+        workspace = MagicMock()
+        workspace.sharedWorkspace.return_value.frontmostApplication.return_value = app
+        appkit = MagicMock()
+        appkit.NSWorkspace = workspace
+        return appkit
+
+    def test_local_when_frontmost_is_regular_app(self) -> None:
+        appkit = self._make_appkit("com.apple.Terminal")
+        with patch.dict("sys.modules", {"AppKit": appkit}):
+            assert is_cursor_on_local_screen() is True
+
+    def test_remote_when_frontmost_is_uc(self) -> None:
+        appkit = self._make_appkit("com.apple.universalcontrol")
+        with patch.dict("sys.modules", {"AppKit": appkit}):
+            assert is_cursor_on_local_screen() is False
+
+    def test_local_when_frontmost_is_none(self) -> None:
+        workspace = MagicMock()
+        workspace.sharedWorkspace.return_value.frontmostApplication.return_value = None
+        appkit = MagicMock()
+        appkit.NSWorkspace = workspace
+        with patch.dict("sys.modules", {"AppKit": appkit}):
+            assert is_cursor_on_local_screen() is True
 
 
 class TestRemoteAwareKeyboardSender:
