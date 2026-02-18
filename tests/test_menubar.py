@@ -166,6 +166,83 @@ class TestRefreshIcon:
             assert app.icon == app._icon_remote_listening
 
 
+class TestUCNotificationDetection:
+    def _setup_app(self) -> "SheptunMenubar":
+        app = _create_menubar()
+        app._run_on_main_thread = lambda f: f()  # type: ignore[assignment]
+        return app
+
+    def _make_notification(self, bundle_id: str) -> MagicMock:
+        notification = MagicMock()
+        app_info = MagicMock()
+        app_info.bundleIdentifier.return_value = bundle_id
+        notification.userInfo.return_value = {"NSWorkspaceApplicationKey": app_info}
+        return notification
+
+    def test_uc_detected_when_uc_becomes_frontmost(self) -> None:
+        app = self._setup_app()
+        notification = self._make_notification("com.apple.universalcontrol")
+        app.onActiveAppChanged_(notification)
+        assert app._uc_active is True
+
+    def test_uc_cleared_when_other_app_becomes_frontmost(self) -> None:
+        app = self._setup_app()
+        app._uc_active = True
+        notification = self._make_notification("com.apple.terminal")
+        app.onActiveAppChanged_(notification)
+        assert app._uc_active is False
+
+    @patch.object(rumps.App, "icon", _test_icon_prop)
+    def test_icon_updates_to_remote_when_uc_detected(self) -> None:
+        app = self._setup_app()
+        app._state = AppState.IDLE
+        notification = self._make_notification("com.apple.universalcontrol")
+
+        with patch("sheptun.menubar.settings", remote_enabled=True):
+            app.onActiveAppChanged_(notification)
+            assert app.icon == app._icon_remote_idle
+
+    @patch.object(rumps.App, "icon", _test_icon_prop)
+    def test_icon_reverts_when_local_app_detected(self) -> None:
+        app = self._setup_app()
+        app._state = AppState.IDLE
+        app._uc_active = True
+        notification = self._make_notification("com.apple.terminal")
+
+        with patch("sheptun.menubar.settings", remote_enabled=True):
+            app.onActiveAppChanged_(notification)
+            assert app.icon == app._icon_idle
+
+    def test_no_refresh_when_state_unchanged(self) -> None:
+        app = self._setup_app()
+        app._uc_active = False
+        refresh_calls: list[int] = []
+        app._refresh_icon = lambda: refresh_calls.append(1)  # type: ignore[assignment]
+        notification = self._make_notification("com.apple.terminal")
+
+        app.onActiveAppChanged_(notification)
+
+        assert not refresh_calls
+
+    def test_handles_none_user_info(self) -> None:
+        app = self._setup_app()
+        notification = MagicMock()
+        notification.userInfo.return_value = None
+
+        app.onActiveAppChanged_(notification)  # should not raise
+
+        assert app._uc_active is False
+
+    def test_handles_missing_app_key(self) -> None:
+        app = self._setup_app()
+        notification = MagicMock()
+        notification.userInfo.return_value = {}
+
+        app.onActiveAppChanged_(notification)
+
+        assert app._uc_active is False
+
+
 class TestOnRemoteReceive:
     def _setup_app(self) -> SheptunMenubar:
         app = _create_menubar()

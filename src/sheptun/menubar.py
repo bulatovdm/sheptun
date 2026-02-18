@@ -1,7 +1,6 @@
 import importlib.resources
 import logging
 import threading
-import time
 from collections.abc import Callable
 from typing import Any
 
@@ -159,7 +158,7 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         self._hotkey_manager.start()
         self._subscribe_to_wake_notifications()
         if settings.remote_enabled:
-            self._start_uc_polling()
+            self._subscribe_to_app_activation()
         self._start_remote_services()
 
     def _start_remote_services(self) -> None:
@@ -468,29 +467,44 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
             self._engine.stop()
             self._engine.start()
 
-    def _start_uc_polling(self) -> None:
-        """Poll frontmost app to detect Universal Control state changes."""
+    def _subscribe_to_app_activation(self) -> None:
+        """Subscribe to frontmost app changes to detect Universal Control transitions."""
+        try:
+            import AppKit
 
-        def poll() -> None:
-            from sheptun.remote import is_cursor_on_local_screen
+            NSWorkspace = getattr(AppKit, "NSWorkspace")  # noqa: B009
+            NSWorkspaceDidActivateApplicationNotification = getattr(  # noqa: B009
+                AppKit, "NSWorkspaceDidActivateApplicationNotification"
+            )
+            center = NSWorkspace.sharedWorkspace().notificationCenter()
+            center.addObserver_selector_name_object_(
+                self,
+                "onActiveAppChanged:",
+                NSWorkspaceDidActivateApplicationNotification,
+                None,
+            )
+            logger.info("Subscribed to app activation notifications for UC detection")
+        except Exception as e:
+            logger.warning(f"Failed to subscribe to app activation notifications: {e}")
 
-            while True:
-                try:
-                    is_local = is_cursor_on_local_screen()
-                    was_uc = self._uc_active
-                    self._uc_active = not is_local
+    def onActiveAppChanged_(self, notification: Any) -> None:
+        try:
+            from sheptun.remote import UC_BUNDLE_ID
 
-                    if self._uc_active != was_uc:
-                        logger.info(f"UC active: {self._uc_active}")
-                        self._refresh_icon()
-                except Exception as e:
-                    logger.debug(f"UC polling error: {e}")
-
-                time.sleep(1.0)
-
-        thread = threading.Thread(target=poll, daemon=True)
-        thread.start()
-        logger.info("UC polling started")
+            user_info = notification.userInfo()
+            if not user_info:
+                return
+            app_info = user_info.get("NSWorkspaceApplicationKey")
+            if app_info is None:
+                return
+            bundle_id = str(app_info.bundleIdentifier() or "")
+            was_uc = self._uc_active
+            self._uc_active = bundle_id == UC_BUNDLE_ID
+            if self._uc_active != was_uc:
+                logger.info(f"UC active: {self._uc_active}")
+                self._refresh_icon()
+        except Exception as e:
+            logger.debug(f"UC activation notification error: {e}")
 
     def _refresh_icon(self) -> None:
         """Re-apply current icon with UC state taken into account."""
