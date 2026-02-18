@@ -190,6 +190,7 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
                 token=settings.remote_token,
             )
             logger.info(f"Remote client configured: {settings.remote_host}:{settings.remote_port}")
+            self._update_remote_status(f"{settings.remote_host}:{settings.remote_port}")
         else:
             from sheptun.remote import RemoteDiscovery
 
@@ -210,8 +211,15 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
                     host=hostname, port=port, token=settings.remote_token
                 )
                 logger.info(f"Auto-discovered remote: {hostname}:{port}")
+                self._update_remote_status(f"{hostname}:{port}")
                 return self._remote_client
         return None
+
+    def _update_remote_status(self, host: str) -> None:
+        if not hasattr(self, "_remote_status_item"):
+            return
+        title = t("menu_remote_connected").format(host=host)
+        self._run_on_main_thread(lambda: setattr(self._remote_status_item, "title", title))
 
     def _run_on_main_thread(self, func: Callable[[], None]) -> None:
         """Schedule a function to run on the main thread via NSOperationQueue."""
