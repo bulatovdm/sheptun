@@ -963,5 +963,303 @@ def disable_autostart() -> None:
             raise typer.Exit(1) from e
 
 
+DEFAULT_TESTSET_DIR = Path("dataset/testset")
+DEFAULT_BENCHMARK_MODELS = "mlx,whisper,apple,parakeet"
+DEFAULT_BENCHMARK_FILES = 5
+
+
+@app.command()
+def benchmark(
+    models: Annotated[
+        str,
+        typer.Option(
+            "--models",
+            "-m",
+            help="Движки для сравнения через запятую: mlx,whisper,apple,parakeet",
+        ),
+    ] = DEFAULT_BENCHMARK_MODELS,
+    files: Annotated[
+        int,
+        typer.Option(
+            "--files",
+            "-n",
+            help="Количество аудиофайлов (0 = все)",
+            min=0,
+        ),
+    ] = DEFAULT_BENCHMARK_FILES,
+    audio_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--audio-dir",
+            "-d",
+            help="Директория с .wav файлами",
+            exists=True,
+            file_okay=False,
+        ),
+    ] = None,
+    transcripts: Annotated[
+        Path | None,
+        typer.Option(
+            "--transcripts",
+            "-t",
+            help="Файл с эталонными транскрипциями (.jsonl). По умолчанию ищется transcripts.jsonl рядом с аудио",
+            exists=True,
+            dir_okay=False,
+        ),
+    ] = None,
+    testset: Annotated[
+        bool,
+        typer.Option(
+            "--testset",
+            help="Использовать эталонный тест-сет из dataset/testset/ (фиксированные фразы)",
+        ),
+    ] = False,
+    no_refs: Annotated[
+        bool,
+        typer.Option(
+            "--no-refs",
+            help="Не использовать эталонные транскрипции (только скорость)",
+        ),
+    ] = False,
+) -> None:
+    """Сравнить скорость и качество распознавания разных движков."""
+    from sheptun.benchmark import load_references, run_benchmark
+
+    model_list = [m.strip() for m in models.split(",") if m.strip()]
+
+    if testset:
+        testset_dir = settings.dataset_path / "testset"
+        wav_dir = audio_dir or testset_dir
+        default_transcripts = testset_dir / "references.jsonl"
+    else:
+        wav_dir = audio_dir or (settings.dataset_path / "audio")
+        default_transcripts = wav_dir.parent / "transcripts.jsonl"
+
+    if not wav_dir.exists():
+        _error(f"Директория не найдена: {wav_dir}")
+        if testset:
+            _hint("Запишите тест-сет: sheptun benchmark --testset --help")
+        else:
+            _hint("Укажите путь: --audio-dir /path/to/wavs")
+        raise typer.Exit(1)
+
+    audio_files = sorted(wav_dir.glob("*.wav"))
+    if not audio_files:
+        if testset:
+            _error(f"Нет .wav файлов в {wav_dir}")
+            _hint("Тест-сет содержит только references.jsonl. Запишите аудио для каждой фразы.")
+            _hint(f"Фразы: {default_transcripts}")
+        else:
+            _error(f"Нет .wav файлов в {wav_dir}")
+        raise typer.Exit(1)
+
+    refs: dict[str, str] = {}
+    if not no_refs:
+        transcripts_path = transcripts or default_transcripts
+        refs = load_references(transcripts_path)
+        if refs:
+            _hint(f"Эталоны загружены: {len(refs)} записей из {transcripts_path}")
+        else:
+            _hint("Эталонные транскрипции не найдены (только метрики скорости)")
+
+    n_files = files if files > 0 else None
+    run_benchmark(model_list, audio_files, n_files, references=refs)
+
+
+_MIN_RECORD_DURATION = 0.3
+_TESTSET_SAMPLE_RATE = 16000
+_TESTSET_SAMPLE_WIDTH = 2
+_TESTSET_CHANNELS = 1
+
+
+def _save_testset_wav(path: Path, audio_bytes: bytes) -> float:
+    """Сохранить аудиобуфер (int16 bytes) в .wav файл. Возвращает длительность в сек."""
+    import wave
+
+    import numpy as np
+
+    audio_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
+    duration = len(audio_int16) / _TESTSET_SAMPLE_RATE
+    with wave.open(str(path), "wb") as wf:
+        wf.setnchannels(_TESTSET_CHANNELS)
+        wf.setsampwidth(_TESTSET_SAMPLE_WIDTH)
+        wf.setframerate(_TESTSET_SAMPLE_RATE)
+        wf.writeframes(audio_int16.tobytes())
+    return duration
+
+
+def _wait_key(prompt: str, accepted: set[str] | None = None) -> str:
+    """Ждать нажатия клавиши с подавлением ввода (не попадает в терминал/Sheptun).
+
+    accepted — множество допустимых символов в нижнем регистре.
+    Если None — принимает любой символ (включая Enter → "").
+    Возвращает символ в нижнем регистре или "" для Enter/Space.
+    """
+    import threading
+
+    from pynput import keyboard
+
+    result: list[str] = []
+    done = threading.Event()
+
+    def on_press(key: keyboard.Key | keyboard.KeyCode | None) -> bool | None:
+        char = ""
+        if key == keyboard.Key.enter or key == keyboard.Key.space:
+            char = ""
+        elif isinstance(key, keyboard.KeyCode) and key.char:
+            char = key.char.lower()
+        else:
+            return None  # игнорировать служебные клавиши
+
+        if accepted is None or char in accepted:
+            result.append(char)
+            done.set()
+            return False  # остановить listener
+        return None
+
+    print(prompt, end="", flush=True)
+    with keyboard.Listener(on_press=on_press, suppress=True):  # type: ignore[arg-type]
+        done.wait()
+
+    print()  # перенос строки после нажатия
+    return result[0] if result else ""
+
+
+def _record_phrase(phrase_id: str, text: str, note: str, out_path: Path) -> bool:
+    """Интерактивная запись одной фразы. Возвращает True если сохранена, False если пропущена."""
+    from sheptun.audio import AudioRecorder
+
+    while True:
+        console.print(f"\n  [bold]{text}[/bold]")
+        if note:
+            console.print(f"  [dim]({note})[/dim]")
+        console.print()
+
+        _wait_key("  Нажмите Enter или пробел чтобы начать запись... ")
+
+        recorder = AudioRecorder()
+        recorder.start()
+        _wait_key("  ● Запись... нажмите Enter или пробел чтобы остановить")
+
+        audio_bytes = recorder.stop()
+        duration = len(audio_bytes) // (_TESTSET_SAMPLE_WIDTH * _TESTSET_CHANNELS) / _TESTSET_SAMPLE_RATE
+
+        if duration < _MIN_RECORD_DURATION:
+            _error(f"Слишком коротко ({duration:.1f} сек), попробуйте снова")
+            continue
+
+        console.print(f"  [green]✓ Записано {duration:.1f} сек[/green]")
+        console.print()
+
+        choice = _wait_key("  [Enter/пробел] сохранить  [r] перезаписать  [s] пропустить: ", {"", "r", "s"})
+
+        if choice == "r":
+            continue
+        if choice == "s":
+            _hint(f"  Пропущено: {phrase_id}")
+            return False
+
+        _save_testset_wav(out_path, audio_bytes)
+        _success(f"Сохранено: {out_path.name}")
+        return True
+
+
+@app.command()
+def record_testset(
+    testset_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--testset-dir",
+            "-d",
+            help="Директория тест-сета с references.jsonl",
+            file_okay=False,
+        ),
+    ] = None,
+    skip_existing: Annotated[
+        bool,
+        typer.Option(
+            "--skip-existing/--no-skip-existing",
+            help="Пропустить уже записанные файлы",
+        ),
+    ] = True,
+    start_from: Annotated[
+        int,
+        typer.Option(
+            "--start-from",
+            "-s",
+            help="Начать с указанной фразы (1-based)",
+            min=1,
+        ),
+    ] = 1,
+) -> None:
+    """Интерактивная запись аудиофайлов для эталонного тест-сета."""
+    from sheptun.benchmark import load_references
+
+    tdir = testset_dir or (settings.dataset_path / "testset")
+    refs_file = tdir / "references.jsonl"
+
+    if not refs_file.exists():
+        _error(f"Файл эталонов не найден: {refs_file}")
+        raise typer.Exit(1)
+
+    tdir.mkdir(parents=True, exist_ok=True)
+
+    refs = load_references(refs_file)
+    if not refs:
+        _error("references.jsonl не содержит записей")
+        raise typer.Exit(1)
+
+    # Восстановить порядок и категории из jsonl напрямую
+    import contextlib
+    import json
+
+    entries: list[dict[str, str]] = []
+    with refs_file.open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                with contextlib.suppress(json.JSONDecodeError):
+                    entries.append(json.loads(line))
+
+    total = len(entries)
+    console.print(f"\n[bold]Запись тест-сета: {total} фраз[/bold]")
+    console.print(f"Директория: {tdir}")
+    if skip_existing:
+        existing = sum(1 for e in entries if (tdir / f"{e['id']}.wav").exists())
+        if existing:
+            _hint(f"Уже записано: {existing}/{total}, будут пропущены")
+    console.print()
+
+    saved = 0
+    skipped = 0
+
+    for i, entry in enumerate(entries, start=1):
+        if i < start_from:
+            continue
+
+        phrase_id = entry.get("id", "")
+        text = entry.get("text", "")
+        category = entry.get("category", "")
+        note = entry.get("note", "")
+        out_path = tdir / f"{phrase_id}.wav"
+
+        if skip_existing and out_path.exists():
+            _hint(f"[{i}/{total}] Пропущено (уже есть): {phrase_id}")
+            skipped += 1
+            continue
+
+        console.print(f"[cyan][{i}/{total}][/cyan] [dim]{category}[/dim]")
+
+        if _record_phrase(phrase_id, text, note, out_path):
+            saved += 1
+        else:
+            skipped += 1
+
+    console.print()
+    _success(f"Готово: записано {saved}, пропущено {skipped} из {total}")
+    if saved > 0:
+        _hint("Запустите бенчмарк: sheptun benchmark --testset")
+
+
 if __name__ == "__main__":
     app()

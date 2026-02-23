@@ -18,6 +18,9 @@ pip install -e .
 # Для MLX Whisper (рекомендуется для Apple Silicon)
 pip install -e ".[mlx]"
 
+# Для Parakeet TDT (NVIDIA NeMo, ~2 ГБ)
+pip install -e ".[parakeet]"
+
 # Для разработки
 pip install -e ".[dev]"
 ```
@@ -49,6 +52,19 @@ sheptun verify-dataset --retry  # Повторить ошибочные
 sheptun verify-dataset --reset  # Сбросить и обработать заново
 sheptun verify-status       # Статус верификации
 sheptun verify-export       # Экспорт в JSONL
+
+# Бенчмарк движков
+sheptun benchmark                              # Сравнить все движки (5 файлов из датасета)
+sheptun benchmark --models mlx,whisper         # Конкретные движки
+sheptun benchmark --models "whisper:turbo,mlx:turbo,parakeet"  # С указанием модели
+sheptun benchmark --testset                    # Запустить на фиксированном тест-сете
+sheptun benchmark --files 20                   # Больше файлов для статистики
+sheptun benchmark --no-refs                    # Только метрики скорости (без CER)
+
+# Запись тест-сета
+sheptun record-testset                         # Записать все 20 фраз интерактивно
+sheptun record-testset --skip-existing         # Дозаписать только отсутствующие
+sheptun record-testset --start-from 5          # Начать с 5-й фразы
 ```
 
 ### Menubar приложение (macOS)
@@ -89,7 +105,7 @@ sheptun disable-autostart   # Отключить автозапуск
 
 ```bash
 # Распознавание речи
-SHEPTUN_RECOGNIZER=whisper        # whisper, mlx или apple
+SHEPTUN_RECOGNIZER=whisper        # whisper, mlx, apple или parakeet
 SHEPTUN_MODEL=medium              # tiny, base, small, medium, large, turbo
 SHEPTUN_DEVICE=                   # cpu, cuda, mps (auto если пусто, только для whisper)
 
@@ -191,6 +207,27 @@ SHEPTUN_APPLE_LOCALE=ru-RU  # или en-US, en-GB, de-DE и т.д.
 - Требует системного разрешения на распознавание речи
 - Поддержка языков зависит от версии macOS
 - Не определяет язык автоматически, нужно выбрать один
+
+### Parakeet TDT (NVIDIA NeMo)
+
+Модель nvidia/parakeet-tdt-0.6b-v3. Поддерживает 25 европейских языков включая русский, определяет язык автоматически. RNN-Transducer архитектура, 600M параметров.
+
+```bash
+pip install -e ".[parakeet]"
+
+SHEPTUN_RECOGNIZER=parakeet
+```
+
+**Особенности:**
+- Автоматическое определение языка (25 языков)
+- Быстрее Whisper на CPU (~30x RTF)
+- Автоматическая пунктуация и заглавные буквы
+- CC-BY-4.0 лицензия
+
+**Ограничения:**
+- Тяжёлые зависимости (~2 ГБ, NVIDIA NeMo)
+- На macOS нет GPU-ускорения через Metal (MPS не поддерживается NeMo)
+- Работает только через CPU на Apple Silicon
 
 ## Фильтрация галлюцинаций
 
@@ -365,6 +402,58 @@ sheptun remote-test 192.168.1.42         # По IP
 | MacBook записывает голос | Remote отклонён → текст вводится локально |
 | MacBook ушёл из сети | Bonjour-сервис пропал → текст вводится локально |
 | MacBook отдельно (без UC) | Оба Sheptun работают независимо |
+
+## Бенчмарк движков
+
+Сравнение скорости (RTF) и качества (CER) разных движков распознавания.
+
+```bash
+# Быстрый бенчмарк на датасете (5 файлов)
+sheptun benchmark
+
+# Сравнение конкретных движков с указанием модели
+sheptun benchmark --models "whisper:turbo,mlx:turbo,parakeet" --files 20
+
+# На фиксированном тест-сете (эталонные фразы)
+sheptun benchmark --testset
+```
+
+**Синтаксис движков:** `движок` или `движок:модель`
+
+| Ключ | Описание |
+|------|----------|
+| `mlx` | MLX Whisper turbo (дефолт) |
+| `mlx:base`, `mlx:large` | MLX с конкретной моделью |
+| `whisper` | Whisper base (CPU) |
+| `whisper:turbo`, `whisper:medium` | Whisper с конкретной моделью |
+| `apple` | Apple Speech Framework |
+| `parakeet` | NVIDIA Parakeet TDT 0.6B v3 |
+
+**Метрики:**
+- **RTF** (Real-Time Factor) — отношение времени inference к длительности аудио. < 1.0 = быстрее реального времени.
+- **CER норм.** — Character Error Rate без учёта пунктуации и регистра
+- **CER точн.** — CER с точной пунктуацией
+
+### Тест-сет
+
+Фиксированный набор эталонных фраз для воспроизводимого сравнения: `dataset/testset/references.jsonl`.
+
+Покрывает: однословные команды, английские термины (`git`, `commit`, `API`), смешанный текст, имена файлов (`.env`, `README.md`), числа, аббревиатуры (`VAD`, `CER`), длинные фразы с запятыми.
+
+Чтобы использовать тест-сет, нужно записать аудиофайлы для каждой фразы:
+
+```bash
+# Записать все фразы интерактивно (показывает текст, Enter → запись → Enter → стоп)
+sheptun record-testset
+
+# Дозаписать только отсутствующие
+sheptun record-testset --skip-existing
+
+# Запустить бенчмарк на тест-сете
+sheptun benchmark --testset
+```
+
+Файлы называются по полю `id` из `references.jsonl`: `01_single_save.wav`, `02_single_enter.wav` и т.д. — хранятся в `dataset/testset/`.
 
 ## Fine-tuning Whisper
 

@@ -336,6 +336,12 @@ class VoiceEngine(BaseVoiceEngine):
             logger.info(f"Using MLX Whisper ({model_name}) for recognition")
             return MLXWhisperRecognizer(model_name=model_name)
 
+        if settings.recognizer == "parakeet":
+            from sheptun.parakeet import ParakeetRecognizer
+
+            logger.info("Using Parakeet TDT for recognition")
+            return ParakeetRecognizer()
+
         from sheptun.recognition import is_local_model
 
         if is_local_model(model_name):

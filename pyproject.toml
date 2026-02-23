@@ -48,6 +48,9 @@ silero = [
 mlx = [
     "mlx-whisper>=0.4.0",
 ]
+parakeet = [
+    "nemo_toolkit[asr]>=1.23.0",
+]
 finetune = [
     "transformers>=4.36.0",
     "datasets>=2.14.0",
@@ -154,6 +157,7 @@ module = [
     "tensorboard.*",
     "soundfile.*",
     "librosa.*",
+    "nemo.*",
 ]
 ignore_missing_imports = true
 
