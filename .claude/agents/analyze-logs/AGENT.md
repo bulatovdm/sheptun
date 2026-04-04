@@ -3,7 +3,7 @@ name: analyze-logs
 description: Analyzes Sheptun speech recognition logs to extract vocabulary for ASR initial_prompt optimization. Finds frequently recognized phrases, technical terms, and common ASR errors. Updates replacements.yaml and SHEPTUN_INITIAL_PROMPT automatically.
 tools: Read Grep Glob Bash Edit
 model: sonnet
-maxTurns: 15
+maxTurns: 25
 ---
 
 # Sheptun Log Analyzer
@@ -82,11 +82,36 @@ List of new replacements added to `replacements.yaml` (or "No new replacements n
 SHEPTUN_INITIAL_PROMPT=<recommended value>
 ```
 
+## Efficient Log Processing
+
+The log file (`logs/sheptun.log`) can be very large (~900K lines). You MUST use these one-liner shell commands — do NOT try to read the file directly or use Python.
+
+**Extract all recognized phrases:**
+```bash
+awk -F"Recognized: '" '/Recognized:/{sub(/.$/,"",$2); print $2}' logs/sheptun.log > /tmp/sheptun_phrases.txt
+```
+
+**Top Russian words by frequency:**
+```bash
+cat /tmp/sheptun_phrases.txt | tr ' ' '\n' | grep -E '^[а-яёА-ЯЁ]+$' | tr '[:upper:]' '[:lower:]' | sort | uniq -c | sort -rn | head -50
+```
+
+**Top English/technical terms:**
+```bash
+cat /tmp/sheptun_phrases.txt | tr ' ' '\n' | grep -iE '^[a-z][a-z0-9._-]+$' | tr '[:upper:]' '[:lower:]' | sort | uniq -c | sort -rn | head -40
+```
+
+**Find transliterated tech terms (potential replacements):**
+```bash
+cat /tmp/sheptun_phrases.txt | tr ' ' '\n' | grep -E '^[а-яёА-ЯЁ]+$' | tr '[:upper:]' '[:lower:]' | sort | uniq -c | sort -rn | grep -iE 'комит|пуш|мердж|мёрдж|бранч|бренч|деплой|диплой|ребейз|фетч|стейдж|докер|кубер|нжинкс|пайтон|питон|тайпскрипт|реакт|бэш|баш|гит|фигм|слак|телеграм|ютуб|клауд|виспер|плейрайт|джейсон|ямл|ридми|вскод|ларавел|пхп|постгрес|битбакет|чекаут|продакшен|продакшн'
+```
+
+IMPORTANT: macOS grep does NOT support `-P` flag. Use `-E` for extended regex.
+
 ## Important Notes
-- Log file is at `logs/sheptun.log` (can be large, ~900K lines)
-- Use grep/awk to process efficiently, don't try to read the entire file at once
-- Focus on recent data (last 1-2 months) if the log is very large
-- The initial_prompt should feel natural, not just a word list
+- NEVER read the log file with the Read tool — it's too large
+- Run shell commands first, analyze output, then edit replacements.yaml
+- Budget your turns: analysis in 5-6 turns, editing in 2-3 turns, report in 1-2 turns
 - Replacements file: `src/sheptun/config/replacements.yaml`
 - User override: `~/.config/sheptun/replacements.yaml`
 - NEVER add sensitive data to replacements or initial_prompt
