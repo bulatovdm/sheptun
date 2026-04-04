@@ -168,7 +168,7 @@ class TestRefreshIcon:
 
 
 class TestUCNotificationDetection:
-    def _setup_app(self) -> "SheptunMenubar":
+    def _setup_app(self) -> SheptunMenubar:
         app = _create_menubar()
         app._run_on_main_thread = lambda f: f()  # type: ignore[assignment]
         return app
@@ -349,7 +349,7 @@ class TestOnRemoteReceive:
 
 
 class TestPTTIcon:
-    def _setup_app(self) -> "SheptunMenubar":
+    def _setup_app(self) -> SheptunMenubar:
         app = _create_menubar()
         app._run_on_main_thread = lambda f: f()  # type: ignore[assignment]
         app._ptt_recorder = MagicMock()

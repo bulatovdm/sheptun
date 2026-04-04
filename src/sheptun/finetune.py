@@ -198,7 +198,7 @@ def _get_device() -> str:
 
 
 def _get_training_args(config: FinetuneConfig, device: str) -> Any:
-    from transformers import Seq2SeqTrainingArguments
+    from transformers.training_args_seq2seq import Seq2SeqTrainingArguments
 
     use_bf16 = device in ("mps", "cuda")
 
@@ -357,7 +357,7 @@ def _create_asr_pipeline(
     tokenizer: Any = None,
     feature_extractor: Any = None,
 ) -> Any:
-    from transformers import pipeline
+    from transformers.pipelines import pipeline
 
     kwargs: dict[str, Any] = {
         "model": model,

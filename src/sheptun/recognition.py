@@ -326,7 +326,7 @@ def _create_asr_pipeline(
     model: str,
     device: str,
 ) -> Any:
-    from transformers import pipeline
+    from transformers.pipelines import pipeline
 
     return pipeline(
         "automatic-speech-recognition",
