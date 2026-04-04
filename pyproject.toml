@@ -39,9 +39,6 @@ spelling = [
     "transformers>=4.30.0",
     "sentencepiece>=0.1.99",
 ]
-verification = [
-    "claude-agent-sdk>=0.1.0",
-]
 silero = [
     "silero-vad>=5.1",
 ]
@@ -148,7 +145,7 @@ module = [
     "pynput.*",
     "sage.*",
     "transformers.*",
-    "claude_agent_sdk.*",
+
     "datasets.*",
     "evaluate.*",
     "peft.*",

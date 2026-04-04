@@ -1,73 +1,15 @@
 from __future__ import annotations
 
-import asyncio
 import json
-import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from rich.console import Console
-
 from sheptun.settings import settings
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-SYSTEM_PROMPT = """\
-You are an expert in Russian speech recognition quality control.
-You verify and correct transcriptions from Whisper speech recognition
-used in a voice-controlled terminal application called Sheptun.
-
-Context about the application:
-- Users speak Russian to control a macOS terminal
-- Common voice commands (said in Russian, mapped to actions):
-  "таб", "шифт таб", "энтер", "ввод", "эскейп", "пробел",
-  "вверх", "вниз", "влево", "вправо", "удалить", "удали",
-  "удали слово", "удали строку", "бэкспейс",
-  "копировать", "вставить", "вырезать", "отменить", "сохранить",
-  "выделить всё", "контрол си", "контрол зэт",
-  "хоум", "энд", "клод" (means "claude")
-- Slash commands: "слэш модель", "слэш хелп", "слэш клир", "слэш компакт",
-  "слэш память", "слэш контекст", "слэш конфиг", "слэш ревью", "слэш баг"
-- Dictation prefixes: "скажи", "введи", "напиши", "текст"
-- Stop commands: "шептун стоп", "шептун хватит", "шептун выход"
-- Users discuss programming, git, APIs, Docker, testing, deployment
-- Mixed Russian/English vocabulary is normal (e.g., "commit", "deploy", "API")
-- Short phrases (1-5 words) are common voice commands
-
-CRITICAL rules for English terms and abbreviations:
-- Keep English terms, file names, and abbreviations in their original form
-- "CLAUDE.md" must stay as "CLAUDE.md", NOT "клауд мд"
-- "README" must stay as "README", NOT "ридми"
-- "Docker", "API", "git", "commit", "deploy", "pytest", "pip" — keep in English
-- File paths and extensions: ".py", ".yaml", ".md", ".env" — keep as-is
-- Programming terms: "fine-tuning", "dataset", "frontend", "backend" — keep in English
-- If Whisper wrote an English term in Russian transliteration, convert it BACK to English
-
-Common Whisper errors to look for:
-1. Word boundary errors (words incorrectly split or merged)
-2. Hallucinated text (repetitive nonsense, foreign scripts, YouTube-style endings)
-3. Wrong words due to phonetic similarity
-4. Missing or incorrect punctuation
-5. Incorrect capitalization
-6. English terms incorrectly transliterated to Russian (e.g., "клауд" → "Claude")
-
-When the ENTIRE transcription is a hallucination — repetitive nonsense, foreign scripts
-(Hebrew, Korean, Japanese, Arabic mixed in), music/subtitle markers ("спокойная музыка",
-"[музыка]"), YouTube-style credits, or garbage text that does not represent real speech —
-set "is_hallucination" to true and "verified_text" to an empty string.
-Do NOT write reject tags, explanations, or anything else instead of JSON.
-
-IMPORTANT: Respond ONLY with valid JSON, no other text:
-{
-  "verified_text": "corrected text or original if correct, empty string if hallucination",
-  "is_correct": true,
-  "is_hallucination": false,
-  "confidence": "high",
-  "notes": "brief explanation of changes, or empty string if correct"
-}"""
 
 DB_SCHEMA = """\
 CREATE TABLE IF NOT EXISTS verifications (
@@ -86,8 +28,6 @@ CREATE TABLE IF NOT EXISTS verifications (
     created_at TEXT NOT NULL,
     completed_at TEXT
 )"""
-
-console = Console()
 
 
 @dataclass(frozen=True)
@@ -302,152 +242,3 @@ def load_transcripts(transcripts_path: Path) -> list[TranscriptRecord]:
     return records
 
 
-class ClaudeVerifier:
-    def __init__(self, model: str | None = None) -> None:
-        self._model = model
-
-    async def verify_single(self, record: TranscriptRecord) -> tuple[VerificationResult, str]:
-        from claude_agent_sdk import (
-            AssistantMessage,
-            ClaudeAgentOptions,
-            TextBlock,
-            query,
-        )
-
-        prompt = self.build_prompt(record)
-        options = ClaudeAgentOptions(
-            system_prompt=SYSTEM_PROMPT,
-            max_turns=1,
-            model=self._model,
-        )
-
-        response_text = ""
-        model_used = self._model or "default"
-        async for message in query(prompt=prompt, options=options):
-            if isinstance(message, AssistantMessage):
-                model_used = message.model
-                for block in message.content:
-                    if isinstance(block, TextBlock):
-                        response_text += block.text
-
-        return self.parse_response(response_text), model_used
-
-    def build_prompt(self, record: TranscriptRecord) -> str:
-        if record.corrected:
-            return (
-                f"Verify this Russian speech transcription.\n"
-                f'Original: "{record.text}"\n'
-                f'Spell-corrected: "{record.corrected}"'
-            )
-        return f'Verify this Russian speech transcription: "{record.text}"'
-
-    def parse_response(self, text: str) -> VerificationResult:
-        cleaned = text.strip()
-
-        # Strip markdown code block
-        if cleaned.startswith("```"):
-            lines = cleaned.split("\n")
-            cleaned = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
-
-        # Extract first JSON object {...} from response
-        match = re.search(r"\{[^{}]*\}", cleaned, re.DOTALL)
-        if match:
-            cleaned = match.group(0)
-
-        data = json.loads(cleaned)
-        is_hallucination = bool(data.get("is_hallucination", False))
-        return VerificationResult(
-            verified_text="" if is_hallucination else data["verified_text"],
-            is_correct=bool(data["is_correct"]),
-            confidence=data.get("confidence", "medium"),
-            notes=data.get("notes", ""),
-            is_hallucination=is_hallucination,
-        )
-
-
-async def run_verification(
-    dataset_path: Path | None = None,
-    limit: int | None = None,
-    model: str | None = None,
-    concurrency: int = 1,
-) -> None:
-    ds_path = dataset_path or settings.dataset_path
-    transcripts_file = ds_path / "transcripts.jsonl"
-
-    if not transcripts_file.exists():
-        console.print("[red]Файл транскрипций не найден[/red]")
-        return
-
-    db = VerificationDB(ds_path / "verification.db")
-
-    try:
-        console.print("[yellow]Загрузка транскрипций...[/yellow]")
-        records = load_transcripts(transcripts_file)
-        inserted = db.insert_pending(records)
-        if inserted > 0:
-            console.print(f"[green]Добавлено {inserted} новых записей в БД[/green]")
-
-        pending = db.get_pending(limit)
-        if not pending:
-            console.print("[green]Нет записей для обработки[/green]")
-            return
-
-        total = len(pending)
-        if concurrency > 1:
-            console.print(
-                f"[yellow]Обработка {total} записей ({concurrency} потоков)...[/yellow]\n"
-            )
-        else:
-            console.print(f"[yellow]Обработка {total} записей...[/yellow]\n")
-
-        verifier = ClaudeVerifier(model=model)
-        completed_count = 0
-
-        async def process_record(record: TranscriptRecord) -> None:
-            nonlocal completed_count
-            try:
-                result, model_used = await verifier.verify_single(record)
-                db.save_result(record.file, result, model_used)
-                completed_count += 1
-
-                if result.is_hallucination:
-                    status = "[red]HALLUCINATION[/red]"
-                elif result.is_correct:
-                    status = "[green]OK[/green]"
-                else:
-                    status = "[yellow]FIXED[/yellow]"
-                console.print(f"[{completed_count}/{total}] {status} {record.file}")
-                if result.is_hallucination:
-                    console.print(f"  [dim]{record.text[:100]}[/dim]")
-                elif not result.is_correct:
-                    console.print(f"  [dim]{record.text}[/dim]")
-                    console.print(f"  [cyan]{result.verified_text}[/cyan]")
-                    if result.notes:
-                        console.print(f"  [dim italic]{result.notes}[/dim italic]")
-            except Exception as e:
-                db.save_error(record.file, str(e))
-                completed_count += 1
-                console.print(f"[{completed_count}/{total}] [red]ERROR[/red] {record.file}: {e}")
-
-        if concurrency <= 1:
-            for record in pending:
-                await process_record(record)
-        else:
-            semaphore = asyncio.Semaphore(concurrency)
-
-            async def limited(record: TranscriptRecord) -> None:
-                async with semaphore:
-                    await process_record(record)
-
-            await asyncio.gather(*(limited(r) for r in pending))
-
-        console.print()
-        stats = db.get_stats()
-        console.print(
-            f"[bold]Готово:[/bold] {stats.get('completed', 0)} обработано, "
-            f"{stats.get('correct', 0)} верных, {stats.get('fixed', 0)} исправлено, "
-            f"{stats.get('hallucinations', 0)} галлюцинаций, "
-            f"{stats.get('error', 0)} ошибок"
-        )
-    finally:
-        db.close()

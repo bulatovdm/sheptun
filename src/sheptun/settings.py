@@ -115,10 +115,6 @@ class Settings:
     recognizer: str = _get_str("SHEPTUN_RECOGNIZER", "whisper")
     # Apple Speech locale: ru-RU, en-US, etc
     apple_locale: str = _get_str("SHEPTUN_APPLE_LOCALE", "ru-RU")
-    # Claude model for transcript verification
-    verify_model: str | None = _get_optional_str("SHEPTUN_VERIFY_MODEL")
-    # Parallel requests for verification (1 = sequential)
-    verify_concurrency: int = int(_get_float("SHEPTUN_VERIFY_CONCURRENCY", 1))
     # Remote text delivery
     remote_enabled: bool = _get_bool("SHEPTUN_REMOTE_ENABLED", False)
     remote_serve: bool = _get_bool("SHEPTUN_REMOTE_SERVE", False)

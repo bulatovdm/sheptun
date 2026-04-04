@@ -45,14 +45,6 @@ sheptun clear-dataset       # Очистить датасет для fine-tuning
 sheptun serve               # Запустить remote-сервер (приёмник)
 sheptun remote-test         # Проверить подключение к remote
 
-# Верификация транскрипций
-sheptun verify-dataset      # Верифицировать транскрипции через Claude
-sheptun verify-dataset -n 10  # Тест на 10 записях
-sheptun verify-dataset --retry  # Повторить ошибочные
-sheptun verify-dataset --reset  # Сбросить и обработать заново
-sheptun verify-status       # Статус верификации
-sheptun verify-export       # Экспорт в JSONL
-
 # Бенчмарк движков
 sheptun benchmark                              # Сравнить все движки (5 файлов из датасета)
 sheptun benchmark --models mlx,whisper         # Конкретные движки
@@ -360,42 +352,6 @@ sheptun download-spelling
 ```
 
 По умолчанию отключено (`none`). Модель занимает ~800MB и требует дополнительных зависимостей.
-
-## Верификация транскрипций
-
-Инструмент для проверки и исправления транскрипций Whisper через Claude. Использует Claude Agent SDK с подпиской Max (без API ключа, $0).
-
-```bash
-# Установить зависимости
-pip install -e ".[verification]"
-
-# Тестовый прогон на 10 записях
-sheptun verify-dataset --limit 10
-
-# Полный прогон всего датасета
-sheptun verify-dataset
-
-# Повторить только ошибочные записи
-sheptun verify-dataset --retry
-
-# Сбросить все результаты и обработать заново
-sheptun verify-dataset --reset
-
-# Посмотреть статистику
-sheptun verify-status
-
-# Экспортировать результаты в JSONL
-sheptun verify-export -o dataset/transcripts_verified.jsonl
-```
-
-Настройка в `.env`:
-
-```bash
-# Модель Claude для верификации (по умолчанию — модель Agent SDK)
-SHEPTUN_VERIFY_MODEL=claude-haiku-4-5-20251001
-```
-
-Результаты хранятся в SQLite (`dataset/verification.db`) — поддерживает инкрементальную обработку и возобновление после прерывания.
 
 ## Remote-ввод (Universal Control)
 
