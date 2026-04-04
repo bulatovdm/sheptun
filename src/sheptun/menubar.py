@@ -8,7 +8,7 @@ import rumps
 
 from sheptun.audio import AudioConfig, AudioRecorder, VoiceActivityConfig
 from sheptun.commands import CommandConfigLoader, CommandParser
-from sheptun.config import get_config_path
+from sheptun.config import get_config_path, get_replacements_path
 from sheptun.engine import BaseVoiceEngine
 from sheptun.hotkeys import HotkeyManager
 from sheptun.i18n import t
@@ -356,7 +356,7 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
             return
 
         config_path = get_config_path()
-        config = CommandConfigLoader.load(config_path)
+        config = CommandConfigLoader.load(config_path, get_replacements_path())
 
         recognizer: SpeechRecognizer
         if settings.recognizer == "apple":

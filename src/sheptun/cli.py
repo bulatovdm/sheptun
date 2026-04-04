@@ -7,7 +7,7 @@ import typer
 from rich.console import Console
 
 from sheptun import __version__
-from sheptun.config import get_config_path
+from sheptun.config import get_config_path, get_replacements_path
 from sheptun.engine import VoiceEngine
 from sheptun.settings import settings, setup_logging
 
@@ -105,6 +105,7 @@ def listen(
         device=device_name,
         use_live_status=not simple_status and not use_debug,
         debug=use_debug,
+        replacements_path=get_replacements_path(),
     )
 
     def signal_handler(_signum: int, _frame: object) -> None:
@@ -191,7 +192,7 @@ def list_commands(
     from sheptun.commands import CommandConfigLoader
 
     config_path = get_config_path(config)
-    command_config = CommandConfigLoader.load(config_path)
+    command_config = CommandConfigLoader.load(config_path, get_replacements_path())
 
     console.print("\n[bold]Команды управления:[/bold]")
     for trigger, action in sorted(command_config.control_commands.items()):

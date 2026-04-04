@@ -44,6 +44,59 @@ class TestHallucinationFiltering:
         assert _check_hallucination("Custom phrase", custom) is True
         assert _check_hallucination("Продолжение следует...", custom) is False
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "[музыка]",
+            "[тишина]",
+            "[Музыка]",
+            "[смех в зале]",
+        ],
+    )
+    def test_bracket_annotations_filtered(self, hallucinations: set[str], text: str) -> None:
+        assert _check_hallucination(text, hallucinations) is True
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "(смех)",
+            "(аплодисменты)",
+            "(неразборчиво)",
+        ],
+    )
+    def test_paren_annotations_filtered(self, hallucinations: set[str], text: str) -> None:
+        assert _check_hallucination(text, hallucinations) is True
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "{неразборчиво}",
+            "{музыка}",
+        ],
+    )
+    def test_brace_annotations_filtered(self, hallucinations: set[str], text: str) -> None:
+        assert _check_hallucination(text, hallucinations) is True
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "<|en|>",
+            "<|0.00|>",
+            "<|en|><|0.00|>",
+        ],
+    )
+    def test_whisper_tags_only_filtered(self, hallucinations: set[str], text: str) -> None:
+        assert _check_hallucination(text, hallucinations) is True
+
+    def test_whisper_tags_with_real_text_not_filtered(self, hallucinations: set[str]) -> None:
+        assert _check_hallucination("<|en|> привет <|0.50|>", hallucinations) is False
+
+    def test_brackets_inside_text_not_filtered(self, hallucinations: set[str]) -> None:
+        assert _check_hallucination("слово [пауза] слово", hallucinations) is False
+
+    def test_parens_inside_text_not_filtered(self, hallucinations: set[str]) -> None:
+        assert _check_hallucination("привет (тихо) мир", hallucinations) is False
+
 
 class TestWhisperRecognizerInit:
     def test_default_hallucinations(self) -> None:

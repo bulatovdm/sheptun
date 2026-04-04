@@ -16,6 +16,10 @@ logger = logging.getLogger("sheptun")
 _SOUND_DESCRIPTION_PATTERN = re.compile(r"^[А-ЯЁ\s]+$")
 _REPETITIVE_PATTERN = re.compile(r"(.{1,3},\s*)\1{4,}")
 _FOREIGN_SCRIPT_PATTERN = re.compile(r"[\u0370-\u03FF\u4E00-\u9FFF\u0600-\u06FF\u3040-\u30FF]")
+_BRACKET_PATTERN = re.compile(r"^\[.*\]$")
+_PAREN_PATTERN = re.compile(r"^\(.*\)$")
+_BRACE_PATTERN = re.compile(r"^\{.*\}$")
+_WHISPER_TAG_PATTERN = re.compile(r"<\|.*?\|>")
 _WARMUP_AUDIO = np.zeros(1600, dtype=np.float32)
 
 
@@ -32,7 +36,16 @@ def _check_hallucination(text: str, hallucinations: set[str]) -> bool:
         return True
     if _REPETITIVE_PATTERN.search(text_stripped):
         return True
-    return bool(_FOREIGN_SCRIPT_PATTERN.search(text_stripped))
+    if _FOREIGN_SCRIPT_PATTERN.search(text_stripped):
+        return True
+    cleaned = _WHISPER_TAG_PATTERN.sub("", text_stripped).strip()
+    if not cleaned:
+        return True
+    if _BRACKET_PATTERN.match(text_stripped):
+        return True
+    if _PAREN_PATTERN.match(text_stripped):
+        return True
+    return bool(_BRACE_PATTERN.match(text_stripped))
 
 
 def _bytes_to_float_array(audio_data: bytes, sample_rate: int) -> np.ndarray[Any, Any] | None:

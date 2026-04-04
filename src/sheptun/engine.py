@@ -310,9 +310,10 @@ class VoiceEngine(BaseVoiceEngine):
         device: str | None = None,
         use_live_status: bool = True,
         debug: bool = False,
+        replacements_path: Path | None = None,
     ) -> "VoiceEngine":
         recognizer = cls._create_recognizer(model_name, device)
-        command_parser = CommandParser.from_config_file(config_path)
+        command_parser = CommandParser.from_config_file(config_path, replacements_path)
         keyboard_sender = MacOSKeyboardSender(use_clipboard=settings.use_clipboard)
         status_indicator: ConsoleStatusIndicator | SimpleStatusIndicator = (
             ConsoleStatusIndicator() if use_live_status else SimpleStatusIndicator()

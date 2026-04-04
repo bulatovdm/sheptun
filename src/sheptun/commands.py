@@ -33,14 +33,25 @@ class CommandConfig:
 
 class CommandConfigLoader:
     @staticmethod
-    def load(config_path: Path) -> CommandConfig:
+    def load(
+        config_path: Path, replacements_path: Path | None = None
+    ) -> CommandConfig:
         with config_path.open(encoding="utf-8") as f:
             raw_config = yaml.safe_load(f)
 
-        return CommandConfigLoader._parse_config(raw_config)
+        replacements: dict[str, str] = {}
+        if replacements_path is not None and replacements_path.exists():
+            with replacements_path.open(encoding="utf-8") as f:
+                loaded = yaml.safe_load(f)
+                if isinstance(loaded, dict):
+                    replacements = loaded
+
+        return CommandConfigLoader._parse_config(raw_config, replacements)
 
     @staticmethod
-    def _parse_config(raw_config: dict[str, Any]) -> CommandConfig:
+    def _parse_config(
+        raw_config: dict[str, Any], replacements: dict[str, str] | None = None
+    ) -> CommandConfig:
         control_commands = CommandConfigLoader._parse_control_commands(
             raw_config.get("control_commands", {})
         )
@@ -48,7 +59,8 @@ class CommandConfigLoader:
         slash_commands = raw_config.get("slash_commands", {})
         dictation_prefixes = raw_config.get("dictation_prefixes", [])
         help_commands = set(raw_config.get("help_commands", []))
-        replacements = raw_config.get("replacements", {})
+        if replacements is None:
+            replacements = raw_config.get("replacements", {})
 
         return CommandConfig(
             control_commands=control_commands,
@@ -94,8 +106,10 @@ class CommandParser:
         self._replacement_patterns = _build_replacement_patterns(config.replacements)
 
     @classmethod
-    def from_config_file(cls, config_path: Path) -> "CommandParser":
-        config = CommandConfigLoader.load(config_path)
+    def from_config_file(
+        cls, config_path: Path, replacements_path: Path | None = None
+    ) -> "CommandParser":
+        config = CommandConfigLoader.load(config_path, replacements_path)
         return cls(config)
 
     def apply_replacements(self, text: str) -> str:

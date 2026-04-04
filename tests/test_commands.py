@@ -208,16 +208,21 @@ class TestReplacements:
 
         assert parser.apply_replacements("привет мир") == "привет мир"
 
-    def test_load_replacements_from_yaml(self) -> None:
-        yaml_content = """
-replacements:
-  гитхаб: GitHub
-  питон: Python
+    def test_load_replacements_from_separate_file(self) -> None:
+        commands_content = """
+control_commands: {}
 """
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            f.write(yaml_content)
-            f.flush()
-            config = CommandConfigLoader.load(Path(f.name))
+        replacements_content = """
+гитхаб: GitHub
+питон: Python
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as cf, \
+             tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as rf:
+            cf.write(commands_content)
+            cf.flush()
+            rf.write(replacements_content)
+            rf.flush()
+            config = CommandConfigLoader.load(Path(cf.name), Path(rf.name))
 
         assert config.replacements == {"гитхаб": "GitHub", "питон": "Python"}
 
