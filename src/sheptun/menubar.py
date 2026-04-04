@@ -376,6 +376,10 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
             self.title = t("notification_loading")
             recognizer.warmup()
             self.title = ""
+        elif settings.recognizer == "qwen":
+            from sheptun.qwen_asr import QwenASRRecognizer
+
+            recognizer = QwenASRRecognizer()
         else:
             recognizer = WhisperRecognizer(model_name=self._model_name)
 

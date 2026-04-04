@@ -342,6 +342,12 @@ class VoiceEngine(BaseVoiceEngine):
             logger.info("Using Parakeet TDT for recognition")
             return ParakeetRecognizer()
 
+        if settings.recognizer == "qwen":
+            from sheptun.qwen_asr import QwenASRRecognizer
+
+            logger.info("Using Qwen3-ASR for recognition")
+            return QwenASRRecognizer()
+
         from sheptun.recognition import is_local_model
 
         if is_local_model(model_name):

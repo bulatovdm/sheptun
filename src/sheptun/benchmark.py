@@ -17,6 +17,7 @@ _MODEL_LABELS: dict[str, str] = {
     "whisper": "Whisper (CPU)",
     "apple": "Apple Speech",
     "parakeet": "Parakeet TDT",
+    "qwen": "Qwen3-ASR",
 }
 
 DEFAULT_MODELS = ["mlx", "whisper", "apple", "parakeet"]
@@ -173,6 +174,11 @@ def _load_recognizer(model_key: str) -> SpeechRecognizer | None:
             from sheptun.parakeet import ParakeetRecognizer
 
             return ParakeetRecognizer()
+
+        if engine == "qwen":
+            from sheptun.qwen_asr import QwenASRRecognizer
+
+            return QwenASRRecognizer(model_id=model or "Qwen/Qwen3-ASR-0.6B")
 
     except ImportError as e:
         console.print(f"[yellow]  Пропуск {model_key}: {e}[/yellow]")

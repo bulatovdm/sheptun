@@ -101,7 +101,7 @@ class Settings:
     auto_space: bool = _get_bool("SHEPTUN_AUTO_SPACE", True)  # Add leading space to text
     # Spell correction: none, t5-russian (200M)
     spell_correction: str = _get_str("SHEPTUN_SPELL_CORRECTION", "none")
-    # Recognizer: whisper, apple, mlx, parakeet
+    # Recognizer: whisper, apple, mlx, parakeet, qwen
     recognizer: str = _get_str("SHEPTUN_RECOGNIZER", "whisper")
     # Apple Speech locale: ru-RU, en-US, etc
     apple_locale: str = _get_str("SHEPTUN_APPLE_LOCALE", "ru-RU")
