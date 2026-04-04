@@ -37,8 +37,9 @@ sheptun listen -m medium    # С указанной моделью Whisper
 sheptun listen --debug      # С логированием
 sheptun test-mic            # Проверка микрофона
 sheptun list-commands       # Список команд
-sheptun list-models         # Показать загруженные модели
-sheptun cleanup-models      # Удалить неиспользуемые модели
+sheptun list-models         # Показать все кэшированные модели и размеры
+sheptun cleanup-models      # Удалить неиспользуемые модели (Whisper, HuggingFace)
+sheptun cleanup-models --dry-run  # Показать что будет удалено
 sheptun clear-dataset       # Очистить датасет для fine-tuning
 
 # Remote-ввод (Universal Control)

@@ -26,8 +26,8 @@ ruff check src tests && mypy src && pyright src tests
 sheptun listen              # CLI mode
 sheptun install-app         # Create menubar app
 sheptun restart             # Restart menubar app
-sheptun list-models         # Show downloaded Whisper models
-sheptun cleanup-models      # Remove unused models
+sheptun list-models         # Show all cached models with sizes
+sheptun cleanup-models      # Remove unused models (Whisper + HuggingFace cache)
 sheptun clear-dataset       # Clear dataset for fine-tuning
 
 ```

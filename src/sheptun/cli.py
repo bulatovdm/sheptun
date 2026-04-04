@@ -295,107 +295,149 @@ def _get_whisper_cache_dir() -> Path:
     return Path.home() / ".cache" / "whisper"
 
 
-@app.command()
-def cleanup_models(
-    model: Annotated[
-        str | None,
-        typer.Argument(help="Имя модели для удаления (или все неактивные если не указано)"),
-    ] = None,
-) -> None:
-    """Удалить модели Whisper."""
-    cache_dir = _get_whisper_cache_dir()
-    if not cache_dir.exists():
-        _hint("Кэш моделей пуст")
-        return
-
-    current_model = settings.model
-
-    if model:
-        if model == current_model:
-            _error(f"Нельзя удалить активную модель '{model}'")
-            raise typer.Exit(1)
-
-        model_file = cache_dir / f"{model}.pt"
-        if not model_file.exists():
-            _error(f"Модель '{model}' не найдена")
-            raise typer.Exit(1)
-
-        size_mb = model_file.stat().st_size / (1024 * 1024)
-        model_file.unlink()
-        _success(f"Удалена модель '{model}' ({size_mb:.0f} MB)")
-        return
-
-    deleted_count = 0
-    total_size_mb = 0.0
-
-    def is_active_model(filename: str) -> bool:
-        name = filename.removesuffix(".pt")
-        return name == current_model or name.startswith(f"{current_model}-")
-
-    for model_file in cache_dir.glob("*.pt"):
-        if not is_active_model(model_file.name):
-            size_mb = model_file.stat().st_size / (1024 * 1024)
-            model_file.unlink()
-            _hint(f"Удалена: {model_file.name} ({size_mb:.0f} MB)")
-            deleted_count += 1
-            total_size_mb += size_mb
-
-    if deleted_count == 0:
-        _success("Нет неиспользуемых моделей")
-    else:
-        _success(f"Удалено {deleted_count} моделей ({total_size_mb:.0f} MB)")
-
-
-def _get_mlx_cache_dir() -> Path:
+def _get_hf_cache_dir() -> Path:
     return Path.home() / ".cache" / "huggingface" / "hub"
 
 
-def _list_mlx_models() -> list[tuple[str, float]]:
-    cache_dir = _get_mlx_cache_dir()
-    if not cache_dir.exists():
-        return []
+def _dir_size_mb(path: Path) -> float:
+    return sum(f.stat().st_size for f in path.rglob("*") if f.is_file()) / (1024 * 1024)
 
-    results: list[tuple[str, float]] = []
-    for model_dir in sorted(cache_dir.glob("models--mlx-community--whisper-*")):
-        name = model_dir.name.removeprefix("models--mlx-community--").replace("--", "/")
-        size_bytes = sum(f.stat().st_size for f in model_dir.rglob("*") if f.is_file())
-        results.append((name, size_bytes / (1024 * 1024)))
+
+def _hf_repo_name(dir_name: str) -> str:
+    return dir_name.removeprefix("models--").replace("--", "/")
+
+
+def _get_active_hf_repos() -> set[str]:
+    from sheptun.recognition import resolve_mlx_model
+
+    repos: set[str] = set()
+    if settings.recognizer == "mlx":
+        repos.add(resolve_mlx_model(settings.model))
+    if settings.recognizer == "qwen":
+        repos.add("Qwen/Qwen3-ASR-0.6B")
+    if settings.recognizer == "parakeet":
+        repos.add("nvidia/parakeet-tdt-0.6b-v3")
+    return repos
+
+
+def _list_cached_models() -> list[tuple[str, str, float, bool]]:
+    """List all cached models: (repo_name, dir_name, size_mb, is_active)."""
+    active_repos = _get_active_hf_repos()
+    active_whisper = settings.model if settings.recognizer == "whisper" else None
+    results: list[tuple[str, str, float, bool]] = []
+
+    # Whisper .pt files
+    whisper_dir = _get_whisper_cache_dir()
+    if whisper_dir.exists():
+        for pt_file in sorted(whisper_dir.glob("*.pt")):
+            name = pt_file.stem
+            size_mb = pt_file.stat().st_size / (1024 * 1024)
+            is_active = active_whisper is not None and (
+                name == active_whisper or name.startswith(f"{active_whisper}-")
+            )
+            results.append((f"whisper/{name}", pt_file.name, size_mb, is_active))
+
+    # HuggingFace models
+    hf_dir = _get_hf_cache_dir()
+    if hf_dir.exists():
+        for model_dir in sorted(hf_dir.glob("models--*")):
+            if not model_dir.is_dir():
+                continue
+            repo = _hf_repo_name(model_dir.name)
+            size_mb = _dir_size_mb(model_dir)
+            is_active = repo in active_repos
+            results.append((repo, model_dir.name, size_mb, is_active))
+
     return results
 
 
 @app.command()
+def cleanup_models(
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Показать что будет удалено, без удаления",
+        ),
+    ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help="Удалить без подтверждения",
+        ),
+    ] = False,
+) -> None:
+    """Удалить неиспользуемые модели из кэша."""
+    models = _list_cached_models()
+    if not models:
+        _hint("Кэш моделей пуст")
+        return
+
+    inactive = [(repo, dir_name, size) for repo, dir_name, size, active in models if not active]
+    if not inactive:
+        _success("Нет неиспользуемых моделей")
+        return
+
+    total_mb = sum(size for _, _, size in inactive)
+    console.print(f"\n[bold]Неиспользуемые модели ({total_mb:.0f} MB):[/bold]")
+    for repo, _, size in inactive:
+        console.print(f"  [red]✗[/red] {repo} ({size:.0f} MB)")
+
+    if dry_run:
+        _hint(f"Dry run: будет освобождено {total_mb:.0f} MB")
+        return
+
+    if not force:
+        confirm = typer.confirm(f"\nУдалить {len(inactive)} моделей ({total_mb:.0f} MB)?")
+        if not confirm:
+            _hint("Отменено")
+            return
+
+    deleted_mb = 0.0
+    whisper_dir = _get_whisper_cache_dir()
+    hf_dir = _get_hf_cache_dir()
+
+    for repo, dir_name, size in inactive:
+        if repo.startswith("whisper/"):
+            target = whisper_dir / dir_name
+            target.unlink(missing_ok=True)
+        else:
+            import shutil
+
+            target = hf_dir / dir_name
+            shutil.rmtree(target, ignore_errors=True)
+        deleted_mb += size
+        _hint(f"Удалена: {repo} ({size:.0f} MB)")
+
+    _success(f"Освобождено {deleted_mb:.0f} MB")
+
+
+@app.command()
 def list_models() -> None:
-    """Показать загруженные модели Whisper."""
-    current_model = settings.model
-    current_recognizer = settings.recognizer
-    has_any = False
-
-    cache_dir = _get_whisper_cache_dir()
-    whisper_models = list(cache_dir.glob("*.pt")) if cache_dir.exists() else []
-
-    if whisper_models:
-        has_any = True
-        console.print("\n[bold]Whisper модели:[/bold]")
-        for model_file in sorted(whisper_models):
-            name = model_file.stem
-            size_mb = model_file.stat().st_size / (1024 * 1024)
-            is_active = current_recognizer == "whisper" and (
-                name == current_model or name.startswith(f"{current_model}-")
-            )
-            marker = " [green]← активная[/green]" if is_active else ""
-            console.print(f"  {name} ({size_mb:.0f} MB){marker}")
-
-    mlx_models = _list_mlx_models()
-    if mlx_models:
-        has_any = True
-        console.print("\n[bold]MLX Whisper модели:[/bold]")
-        for name, size_mb in mlx_models:
-            is_active = current_recognizer == "mlx" and current_model in name
-            marker = " [green]← активная[/green]" if is_active else ""
-            console.print(f"  {name} ({size_mb:.0f} MB){marker}")
-
-    if not has_any:
+    """Показать загруженные модели и занимаемое место."""
+    models = _list_cached_models()
+    if not models:
         _hint("Нет загруженных моделей")
+        return
+
+    total_mb = sum(size for _, _, size, _ in models)
+    active_mb = sum(size for _, _, size, active in models if active)
+    inactive_mb = total_mb - active_mb
+
+    console.print(f"\n[bold]Загруженные модели ({total_mb:.0f} MB):[/bold]")
+    for repo, _, size, is_active in models:
+        if is_active:
+            console.print(f"  [green]✓[/green] {repo} ({size:.0f} MB) [green]← активная[/green]")
+        else:
+            console.print(f"  [dim]  {repo} ({size:.0f} MB)[/dim]")
+
+    if inactive_mb > 100:
+        console.print(
+            f"\n[yellow]Можно освободить {inactive_mb:.0f} MB: "
+            f"sheptun cleanup-models[/yellow]"
+        )
 
 
 @app.command()
