@@ -170,6 +170,58 @@ class TestCommandParser:
         assert action.value == "скажи"
 
 
+class TestReplacements:
+    def test_apply_replacements_basic(self) -> None:
+        config = CommandConfig(replacements={"гитхаб": "GitHub", "питон": "Python"})
+        parser = CommandParser(config)
+
+        assert parser.apply_replacements("открой гитхаб") == "открой GitHub"
+
+    def test_apply_replacements_case_insensitive(self) -> None:
+        config = CommandConfig(replacements={"гитхаб": "GitHub"})
+        parser = CommandParser(config)
+
+        assert parser.apply_replacements("Открой Гитхаб") == "Открой GitHub"
+
+    def test_apply_replacements_multiple(self) -> None:
+        config = CommandConfig(replacements={"питон": "Python", "докер": "docker"})
+        parser = CommandParser(config)
+
+        assert parser.apply_replacements("запусти питон в докер") == "запусти Python в docker"
+
+    def test_apply_replacements_word_boundary(self) -> None:
+        config = CommandConfig(replacements={"баш": "bash"})
+        parser = CommandParser(config)
+
+        result = parser.apply_replacements("открой баш")
+        assert result == "открой bash"
+
+    def test_apply_replacements_no_match(self) -> None:
+        config = CommandConfig(replacements={"гитхаб": "GitHub"})
+        parser = CommandParser(config)
+
+        assert parser.apply_replacements("привет мир") == "привет мир"
+
+    def test_apply_replacements_empty(self) -> None:
+        config = CommandConfig()
+        parser = CommandParser(config)
+
+        assert parser.apply_replacements("привет мир") == "привет мир"
+
+    def test_load_replacements_from_yaml(self) -> None:
+        yaml_content = """
+replacements:
+  гитхаб: GitHub
+  питон: Python
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            f.flush()
+            config = CommandConfigLoader.load(Path(f.name))
+
+        assert config.replacements == {"гитхаб": "GitHub", "питон": "Python"}
+
+
 class TestCommandConfig:
     def test_default_values(self) -> None:
         config = CommandConfig()
@@ -179,6 +231,7 @@ class TestCommandConfig:
         assert config.slash_commands == {}
         assert config.dictation_prefixes == []
         assert config.help_commands == set()
+        assert config.replacements == {}
 
 
 class TestCommandConfigLoader:

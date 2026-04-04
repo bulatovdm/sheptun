@@ -101,6 +101,16 @@ class Settings:
     auto_space: bool = _get_bool("SHEPTUN_AUTO_SPACE", True)  # Add leading space to text
     # Spell correction: none, t5-russian (200M)
     spell_correction: str = _get_str("SHEPTUN_SPELL_CORRECTION", "none")
+    # Whisper initial_prompt: context hint for better recognition of domain terms
+    initial_prompt: str = _get_str(
+        "SHEPTUN_INITIAL_PROMPT",
+        "Давай сделай коммит и пуш, пожалуйста. Посмотри тесты, проверь ошибки. "
+        "Добавь файл в конфиг. Запусти деплой контейнера в docker на staging. "
+        "Открой терминал, консоль. Сервер nginx на production. Скрипт на Python, "
+        "Laravel, PHP. Дебаг логи, рефакторинг модуля. Запрос к API, клиент SSH, "
+        "VPN. Фронтенд: Tailwind, Figma, Playwright. Бэкенд: JSON, SDK, LLM, "
+        "Claude. Линтер, миграция, композер. Git push, commit. VS Code, bash.",
+    )
     # Recognizer: whisper, apple, mlx, parakeet, qwen
     recognizer: str = _get_str("SHEPTUN_RECOGNIZER", "whisper")
     # Apple Speech locale: ru-RU, en-US, etc

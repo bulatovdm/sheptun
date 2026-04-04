@@ -105,7 +105,7 @@ sheptun disable-autostart   # Отключить автозапуск
 
 ```bash
 # Распознавание речи
-SHEPTUN_RECOGNIZER=whisper        # whisper, mlx, apple или parakeet
+SHEPTUN_RECOGNIZER=whisper        # whisper, mlx, apple, parakeet или qwen
 SHEPTUN_MODEL=medium              # tiny, base, small, medium, large, turbo
 SHEPTUN_DEVICE=                   # cpu, cuda, mps (auto если пусто, только для whisper)
 
@@ -228,6 +228,53 @@ SHEPTUN_RECOGNIZER=parakeet
 - Тяжёлые зависимости (~2 ГБ, NVIDIA NeMo)
 - На macOS нет GPU-ускорения через Metal (MPS не поддерживается NeMo)
 - Работает только через CPU на Apple Silicon
+
+### Qwen3-ASR (MLX, Apple Silicon)
+
+Модель Qwen/Qwen3-ASR-0.6B через mlx-qwen3-asr. Поддерживает 30 языков включая русский. Работает нативно на Apple Silicon без PyTorch.
+
+```bash
+pip install mlx-qwen3-asr
+
+SHEPTUN_RECOGNIZER=qwen
+```
+
+**Особенности:**
+- 30 языков, автоопределение
+- ~1.2 ГБ RAM (0.6B), ~3.4 ГБ (1.7B)
+- Высокая шумоустойчивость (WER 16% vs 63% у Whisper в шуме)
+- Apache 2.0 лицензия
+
+**Ограничения:**
+- Транслитерирует английские термины в русский ("git commit" → "гит комит")
+- Менее точен на чистом русском в тихой среде по сравнению с Whisper Turbo
+
+## Улучшение распознавания
+
+### Initial prompt
+
+Whisper использует `initial_prompt` как контекстную подсказку при декодировании. Это помогает правильно распознавать технические термины (git, docker, VS Code) без дополнительной задержки.
+
+```bash
+# Настроить в .env (опционально, есть дефолтное значение)
+SHEPTUN_INITIAL_PROMPT=Здравствуйте, как дела? Открой терминал. Сделай git commit. Запусти docker, pytest.
+```
+
+Работает только с Whisper и MLX Whisper. Лимит — 224 токена.
+
+### Замена слов (replacements)
+
+Автоматическая замена слов после транскрипции. Исправляет типичные ошибки ASR для технических терминов. Настраивается в `sheptun.yaml`:
+
+```yaml
+replacements:
+  гитхаб: GitHub
+  питон: Python
+  докер: docker
+  ридми: README
+```
+
+Замены case-insensitive, применяются по границам слов. Работает со всеми движками распознавания.
 
 ## Фильтрация галлюцинаций
 
@@ -428,6 +475,7 @@ sheptun benchmark --testset
 | `whisper:turbo`, `whisper:medium` | Whisper с конкретной моделью |
 | `apple` | Apple Speech Framework |
 | `parakeet` | NVIDIA Parakeet TDT 0.6B v3 |
+| `qwen` | Qwen3-ASR 0.6B (MLX) |
 
 **Метрики:**
 - **RTF** (Real-Time Factor) — отношение времени inference к длительности аудио. < 1.0 = быстрее реального времени.

@@ -61,7 +61,7 @@ src/sheptun/
 └── types.py        # Protocols, dataclasses, enums (AppState)
 ```
 
-**Data flow:** Microphone → VAD → Whisper → CommandParser → KeyboardSender
+**Data flow:** Microphone → VAD → Whisper → Hallucination filter → Spell correction → Word replacements → CommandParser → KeyboardSender
 
 ## Configuration
 
@@ -113,6 +113,10 @@ Command config: `./sheptun.yaml` or `~/.config/sheptun/commands.yaml`
 - Unused code — delete it, don't comment out
 - Deep nesting — refactor with early returns or extract methods
 - Long parameter lists — use dataclasses or config objects
+
+## Custom Agents
+
+- **analyze-logs** — Analyzes `logs/sheptun.log` to extract vocabulary for ASR optimization. Generates recommended `SHEPTUN_INITIAL_PROMPT` and word `replacements` for `sheptun.yaml`. Invoke via `@analyze-logs`.
 
 ## Git Commits
 

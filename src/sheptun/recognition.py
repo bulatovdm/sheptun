@@ -193,10 +193,12 @@ class WhisperRecognizer(_WarmupMixin):
         device: str | None = None,
         hallucinations: tuple[str, ...] | None = None,
         warmup_interval: float | None = None,
+        initial_prompt: str | None = None,
     ) -> None:
         self._model: Any = whisper.load_model(model_name, device=device)
         self._model_name = model_name
         self._hallucinations = {h.lower() for h in (hallucinations or settings.hallucinations)}
+        self._initial_prompt = initial_prompt if initial_prompt is not None else settings.initial_prompt
         self._init_warmup(warmup_interval)
 
     @property
@@ -217,6 +219,7 @@ class WhisperRecognizer(_WarmupMixin):
             fp16=False,
             task="transcribe",
             condition_on_previous_text=False,
+            initial_prompt=self._initial_prompt or None,
         )
 
         original_text = result.get("text", "").strip()
@@ -246,6 +249,7 @@ class WhisperRecognizer(_WarmupMixin):
             fp16=False,
             task="transcribe",
             condition_on_previous_text=False,
+            initial_prompt=self._initial_prompt or None,
         )
 
         original_text = result.get("text", "").strip()
@@ -378,10 +382,12 @@ class MLXWhisperRecognizer(_WarmupMixin):
         model_name: str = "turbo",
         hallucinations: tuple[str, ...] | None = None,
         warmup_interval: float | None = None,
+        initial_prompt: str | None = None,
     ) -> None:
         self._model_repo = resolve_mlx_model(model_name)
         self._model_name = model_name
         self._hallucinations = {h.lower() for h in (hallucinations or settings.hallucinations)}
+        self._initial_prompt = initial_prompt if initial_prompt is not None else settings.initial_prompt
         self._transcribe_lock = threading.Lock()
         self._init_warmup(warmup_interval)
 
@@ -468,6 +474,7 @@ class MLXWhisperRecognizer(_WarmupMixin):
                 language="ru",
                 fp16=True,
                 condition_on_previous_text=False,
+                initial_prompt=self._initial_prompt or None,
             )
 
         original_text = result.get("text", "").strip()

@@ -113,9 +113,10 @@ class BaseVoiceEngine:
         try:
             result = self._recognizer.recognize(audio_data, self.sample_rate)
             if result and result.text:
-                self._log(f"Recognized: '{result.text}'")
+                text = self._command_parser.apply_replacements(result.text)
+                self._log(f"Recognized: '{text}'")
                 self._save_to_dataset(audio_data, result.text)
-                action = self._command_parser.parse(result.text)
+                action = self._command_parser.parse(text)
                 if action:
                     self._execute_action(action)
         except Exception as e:
@@ -184,10 +185,14 @@ class BaseVoiceEngine:
                 self._resume_listening()
                 return
 
-            self._log(f"Recognized: '{result.text}'")
-            self._status.show_recognized(result.text)
+            text = self._command_parser.apply_replacements(result.text)
+            if text != result.text:
+                self._log(f"Recognized: '{result.text}' -> '{text}'")
+            else:
+                self._log(f"Recognized: '{text}'")
+            self._status.show_recognized(text)
             self._save_to_dataset(audio_data, result.text, result.original_text)
-            action = self._command_parser.parse(result.text)
+            action = self._command_parser.parse(text)
             self._log(f"Parsed action: {action}")
 
             if action is not None:

@@ -122,3 +122,52 @@ dictation_prefixes:
   - "введи"
   - "напиши"
   - "текст"
+
+# Word replacements (applied after transcription, before command parsing)
+# Fixes common ASR errors and normalizes technical terms
+replacements:
+  # Нормализация написания (из анализа 41K фраз за 3 месяца)
+  "комит": "коммит"
+  "комитт": "коммит"
+  "продакшен": "продакшн"
+  "ларавелл": "Laravel"
+  "телеграмм": "Telegram"
+  "постгресс": "PostgreSQL"
+
+  # Git
+  "гитхаб": "GitHub"
+  "гит хаб": "GitHub"
+  "гитлаб": "GitLab"
+  "битбакет": "Bitbucket"
+  "чекаут": "checkout"
+
+  # Языки и рантаймы
+  "пайтон": "Python"
+  "питон": "Python"
+  "тайпскрипт": "TypeScript"
+  "пхп": "PHP"
+
+  # Инструменты и сервисы
+  "бэш": "bash"
+  "баш": "bash"
+  "вскод": "VS Code"
+  "докер": "docker"
+  "кубернетис": "kubernetes"
+  "энджинкс": "nginx"
+  "нжинкс": "nginx"
+  "ридми": "README"
+  "клауд": "Claude"
+  "виспер": "Whisper"
+  "плейрайт": "Playwright"
+  "фигма": "Figma"
+  "джанго": "Django"
+  "джейсон": "JSON"
+  "ямл": "YAML"
+
+  # DevOps
+  "диплой": "деплой"
+
+  # Мессенджеры и сервисы
+  "ютуб": "YouTube"
+  "вотсап": "WhatsApp"
+  "слак": "Slack"

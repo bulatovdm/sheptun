@@ -11,6 +11,16 @@ PUNCTUATION_PATTERN = re.compile(r"[^\w\s]", re.UNICODE)
 SLASH_PREFIXES = ("слэш ", "слышь ", "слеш ")
 
 
+def _build_replacement_patterns(
+    replacements: dict[str, str],
+) -> list[tuple[re.Pattern[str], str]]:
+    patterns: list[tuple[re.Pattern[str], str]] = []
+    for old, new in replacements.items():
+        pattern = re.compile(r"\b" + re.escape(old) + r"\b", re.IGNORECASE | re.UNICODE)
+        patterns.append((pattern, new))
+    return patterns
+
+
 @dataclass
 class CommandConfig:
     control_commands: dict[str, Action] = field(default_factory=dict)
@@ -18,6 +28,7 @@ class CommandConfig:
     slash_commands: dict[str, str] = field(default_factory=dict)
     dictation_prefixes: list[str] = field(default_factory=list)
     help_commands: set[str] = field(default_factory=set)
+    replacements: dict[str, str] = field(default_factory=dict)
 
 
 class CommandConfigLoader:
@@ -37,6 +48,7 @@ class CommandConfigLoader:
         slash_commands = raw_config.get("slash_commands", {})
         dictation_prefixes = raw_config.get("dictation_prefixes", [])
         help_commands = set(raw_config.get("help_commands", []))
+        replacements = raw_config.get("replacements", {})
 
         return CommandConfig(
             control_commands=control_commands,
@@ -44,6 +56,7 @@ class CommandConfigLoader:
             slash_commands=slash_commands,
             dictation_prefixes=dictation_prefixes,
             help_commands=help_commands,
+            replacements=replacements,
         )
 
     @staticmethod
@@ -78,11 +91,17 @@ class CommandConfigLoader:
 class CommandParser:
     def __init__(self, config: CommandConfig) -> None:
         self._config = config
+        self._replacement_patterns = _build_replacement_patterns(config.replacements)
 
     @classmethod
     def from_config_file(cls, config_path: Path) -> "CommandParser":
         config = CommandConfigLoader.load(config_path)
         return cls(config)
+
+    def apply_replacements(self, text: str) -> str:
+        for pattern, replacement in self._replacement_patterns:
+            text = pattern.sub(replacement, text)
+        return text
 
     def parse(self, text: str) -> Action | None:
         normalized = self._normalize_text(text)
