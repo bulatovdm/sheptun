@@ -6,6 +6,7 @@ from pathlib import Path
 from sheptun.audio import AudioConfig, ContinuousAudioRecorder, VoiceActivityConfig
 from sheptun.commands import CommandParser
 from sheptun.dataset import DatasetRecorder
+from sheptun.formatting import TechnicalFormatter
 from sheptun.keyboard import MacOSKeyboardSender
 from sheptun.recognition import WhisperRecognizer
 from sheptun.settings import settings
@@ -41,6 +42,7 @@ class BaseVoiceEngine:
         self._vad_config = vad_config
         self._recorder: ContinuousAudioRecorder | None = None
         self._dataset_recorder = DatasetRecorder() if record_dataset else None
+        self._formatter = TechnicalFormatter()
         self._state = AppState.IDLE
         self._lock = threading.Lock()
         self._current_window_id: str | None = None
@@ -114,6 +116,7 @@ class BaseVoiceEngine:
             result = self._recognizer.recognize(audio_data, self.sample_rate)
             if result and result.text:
                 text = self._command_parser.apply_replacements(result.text)
+                text = self._formatter.format(text)
                 self._log(f"Recognized: '{text}'")
                 self._save_to_dataset(audio_data, result.text)
                 action = self._command_parser.parse(text)
@@ -186,6 +189,7 @@ class BaseVoiceEngine:
                 return
 
             text = self._command_parser.apply_replacements(result.text)
+            text = self._formatter.format(text)
             if text != result.text:
                 self._log(f"Recognized: '{result.text}' -> '{text}'")
             else:
