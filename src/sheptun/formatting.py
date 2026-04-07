@@ -1,4 +1,5 @@
 import re
+from functools import partial
 
 _EXTENSIONS = frozenset({
     "env", "php", "py", "js", "ts", "jsx", "tsx", "yaml", "yml",
@@ -40,22 +41,10 @@ _ALWAYS_SYMBOLS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bзапятая\b", re.IGNORECASE), ","),
     (re.compile(r"\bдвоеточие\b", re.IGNORECASE), ":"),
     (re.compile(r"\bсобачка\b", re.IGNORECASE), "@"),
-    (re.compile(r"\bсобака\b", re.IGNORECASE), "@"),
-    (re.compile(r"\bреш[её]тка\b", re.IGNORECASE), "#"),
     (re.compile(r"\bхэш\b", re.IGNORECASE), "#"),
-    (re.compile(r"\bзв[её]здочка\b", re.IGNORECASE), "*"),
     (re.compile(r"\bамперсанд\b", re.IGNORECASE), "&"),
     (re.compile(r"\bпайп\b", re.IGNORECASE), "|"),
-    (re.compile(r"\bравно\b", re.IGNORECASE), "="),
-    (re.compile(r"\bстрелочка\b", re.IGNORECASE), "->"),
-    (re.compile(r"\bстрелка\b", re.IGNORECASE), "->"),
-    (re.compile(r"\bкавычка\b", re.IGNORECASE), "'"),
     (re.compile(r"\bбэктик\b", re.IGNORECASE), "`"),
-    (re.compile(r"\bвосклицательный\b", re.IGNORECASE), "!"),
-    (re.compile(r"\bвопросительный\b", re.IGNORECASE), "?"),
-    (re.compile(r"\bпроцент\b", re.IGNORECASE), "%"),
-    (re.compile(r"\bплюс\b", re.IGNORECASE), "+"),
-    (re.compile(r"\bминус\b", re.IGNORECASE), "-"),
     (re.compile(r"\bмноготочие\b", re.IGNORECASE), "..."),
     (re.compile(r"\bтильда\b", re.IGNORECASE), "~"),
 ]
@@ -73,15 +62,28 @@ _SINGLE_TIRE_LATIN = re.compile(
 
 _SLASH_PREFIXES_LOWER = ("слэш ", "слеш ", "слышь ")
 
+_CASING_SEP = r"[,.\s]*\s+"
+
 _CASING_COMMANDS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"^к[эе]мел\s+кейс\s+", re.IGNORECASE), "camel"),
-    (re.compile(r"^камел\s+кейс\s+", re.IGNORECASE), "camel"),
-    (re.compile(r"^снейк\s+кейс\s+", re.IGNORECASE), "snake"),
-    (re.compile(r"^паскал[ьъ]?\s+кейс\s+", re.IGNORECASE), "pascal"),
-    (re.compile(r"^кебаб\s+кейс\s+", re.IGNORECASE), "kebab"),
+    (re.compile(r"^к[аэе]мел[ьъ]?" + _CASING_SEP + r"кейс" + _CASING_SEP, re.IGNORECASE), "camel"),
+    (re.compile(r"^к[аэе]мел[ьъ]?кейс" + _CASING_SEP, re.IGNORECASE), "camel"),
+    (re.compile(r"^camel\s*case" + _CASING_SEP, re.IGNORECASE), "camel"),
+    (re.compile(r"^снейк" + _CASING_SEP + r"кейс" + _CASING_SEP, re.IGNORECASE), "snake"),
+    (re.compile(r"^снейккейс" + _CASING_SEP, re.IGNORECASE), "snake"),
+    (re.compile(r"^snake\s*case" + _CASING_SEP, re.IGNORECASE), "snake"),
+    (re.compile(r"^паскал[ьъ]?" + _CASING_SEP + r"кейс" + _CASING_SEP, re.IGNORECASE), "pascal"),
+    (re.compile(r"^паскал[ьъ]?кейс" + _CASING_SEP, re.IGNORECASE), "pascal"),
+    (re.compile(r"^pascal\s*case" + _CASING_SEP, re.IGNORECASE), "pascal"),
+    (re.compile(r"^кебаб" + _CASING_SEP + r"кейс" + _CASING_SEP, re.IGNORECASE), "kebab"),
+    (re.compile(r"^кебабкейс" + _CASING_SEP, re.IGNORECASE), "kebab"),
+    (re.compile(r"^kebab\s*case" + _CASING_SEP, re.IGNORECASE), "kebab"),
 ]
 
-_DOT_EXT_SPACE = re.compile(r"(\S)\s+\.(\w+)\b")
+_DOT_EXT_SPACE = re.compile(
+    r"(\S)\s+\.("
+    + "|".join(re.escape(e) for e in sorted(_EXTENSIONS, key=len, reverse=True))
+    + r")\b"
+)
 _UNDERSCORE_SEGMENT = re.compile(r"\w+(?:_\w+)+")
 
 
@@ -119,8 +121,7 @@ class TechnicalFormatter:
             return result
 
         for pattern, symbol in _ALWAYS_SYMBOLS:
-            repl = symbol
-            text = pattern.sub(lambda _m, r=repl: r, text)  # type: ignore[misc]
+            text = pattern.sub(partial(lambda r, _m: r, symbol), text)
 
         text = _TOCHKA_EXT.sub(r".\1", text)
         text = _DOT_EXT_SPACE.sub(r"\1.\2", text)
@@ -183,7 +184,7 @@ class TechnicalFormatter:
                 return text
             filename_words: list[str] = []
             for w in reversed(words):
-                if re.match(r"^[\w]+$", w, re.UNICODE):
+                if re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", w):
                     filename_words.insert(0, w)
                 else:
                     break

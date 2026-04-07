@@ -34,25 +34,19 @@ class TestAlwaysConvertSymbols:
         assert ";" in format_technical("a точка запятая b")
 
     def test_at_sign(self) -> None:
-        assert "@" in format_technical("user собака example")
+        assert "@" in format_technical("user собачка example")
 
     def test_hash(self) -> None:
-        assert "#" in format_technical("решётка comment")
+        assert "#" in format_technical("хэш comment")
 
     def test_pipe(self) -> None:
         assert "|" in format_technical("grep пайп sort")
-
-    def test_equals(self) -> None:
-        assert "=" in format_technical("x равно 5")
 
     def test_double_equals(self) -> None:
         assert "==" in format_technical("x двойное равно y")
 
     def test_triple_equals(self) -> None:
         assert "===" in format_technical("x тройное равно y")
-
-    def test_arrow(self) -> None:
-        assert "->" in format_technical("this стрелка name")
 
     def test_fat_arrow(self) -> None:
         assert "=>" in format_technical("x жирная стрелка y")
@@ -75,9 +69,6 @@ class TestAlwaysConvertSymbols:
         assert "{" in result
         assert "}" in result
 
-    def test_single_quote(self) -> None:
-        assert "'" in format_technical("кавычка hello кавычка")
-
     def test_double_quote(self) -> None:
         assert '"' in format_technical("двойная кавычка hello двойная кавычка")
 
@@ -90,20 +81,18 @@ class TestAlwaysConvertSymbols:
     def test_question(self) -> None:
         assert "?" in format_technical("вопросительный знак")
 
-    def test_plus(self) -> None:
-        assert "+" in format_technical("a плюс b")
-
-    def test_minus(self) -> None:
-        assert "-" in format_technical("a минус b")
-
-    def test_percent(self) -> None:
-        assert "%" in format_technical("100 процент")
-
     def test_spread(self) -> None:
         assert "..." in format_technical("многоточие args")
 
     def test_tilde(self) -> None:
         assert "~" in format_technical("тильда .config")
+
+    def test_normal_speech_not_converted(self) -> None:
+        assert format_technical("у него собака дома") == "у него собака дома"
+        assert format_technical("это равно пяти") == "это равно пяти"
+        assert format_technical("два плюс два") == "два плюс два"
+        assert format_technical("a минус b") == "a минус b"
+        assert format_technical("стрелка вправо") == "стрелка вправо"
 
 
 class TestContextSymbols:
@@ -135,6 +124,11 @@ class TestContextSymbols:
     def test_single_tire_between_cyrillic_preserved(self) -> None:
         assert format_technical("поставь тире здесь") == "поставь тире здесь"
 
+    def test_cyrillic_not_captured_by_auto_casing(self) -> None:
+        result = format_technical("создай user service точка py")
+        assert "создай" in result
+        assert result.endswith(".py")
+
 
 class TestCasingCommands:
     def test_camel_case(self) -> None:
@@ -154,6 +148,18 @@ class TestCasingCommands:
 
     def test_kebab_case(self) -> None:
         assert format_technical("кебаб кейс my component") == "my-component"
+
+    def test_camel_case_merged(self) -> None:
+        assert format_technical("Камелькейс, get user name") == "getUserName"
+
+    def test_snake_case_english(self) -> None:
+        assert format_technical("SnakeCase get user name") == "get_user_name"
+
+    def test_camel_case_english(self) -> None:
+        assert format_technical("CamelCase get user name") == "getUserName"
+
+    def test_pascal_case_english(self) -> None:
+        assert format_technical("PascalCase user service") == "UserService"
 
 
 class TestAutoCasingByExtension:
