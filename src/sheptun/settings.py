@@ -60,6 +60,7 @@ _DEFAULT_HALLUCINATIONS = (
     "А.Егорова",
     "А.Семкин",
     "А.Синецкая",
+    "DimaTorzok",
     # YouTube-style endings (English - may appear in Russian audio)
     "Thank you for watching",
     "Thanks for watching",
