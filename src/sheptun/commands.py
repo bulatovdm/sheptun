@@ -60,7 +60,7 @@ class CommandConfigLoader:
         dictation_prefixes = raw_config.get("dictation_prefixes", [])
         help_commands = set(raw_config.get("help_commands", []))
         if replacements is None:
-            replacements = raw_config.get("replacements", {})
+            replacements = dict(raw_config.get("replacements", {}))
 
         return CommandConfig(
             control_commands=control_commands,
