@@ -79,3 +79,20 @@
 # Инструменты
 "вайргард": "WireGuard"
 "виргард": "WireGuard"
+"мцп": "MCP"
+"мцпшка": "MCP"
+"мцпшке": "MCP"
+"мцпшку": "MCP"
+
+# Нормализация
+"депло": "деплой"
+"скил": "скилл"
+"промт": "промпт"
+
+# ASR-ошибки (из анализа логов 2026-03-24 — 2026-04-07)
+"CloudMD": "CLAUDE.md"
+"Cloudymd": "CLAUDE.md"
+"cloudmt": "CLAUDE.md"
+"clouddmd": "CLAUDE.md"
+"Cloud MD": "CLAUDE.md"
+"defis": "дефис"
