@@ -6,10 +6,12 @@ import pytest
 from sheptun.recognition import (
     _FOREIGN_SCRIPT_PATTERN,
     _REPETITIVE_PATTERN,
+    _REPETITIVE_WORD_PATTERN,
     _SOUND_DESCRIPTION_PATTERN,
     MLX_MODELS,
     _calculate_confidence,
     _check_hallucination,
+    _has_phrase_repetition,
     resolve_mlx_model,
 )
 
@@ -97,6 +99,19 @@ class TestHallucinationFiltering:
     def test_parens_inside_text_not_filtered(self, hallucinations: set[str]) -> None:
         assert _check_hallucination("привет (тихо) мир", hallucinations) is False
 
+    def test_repeated_word_hallucination(self, hallucinations: set[str]) -> None:
+        assert _check_hallucination("Creative " * 20, hallucinations) is True
+        assert _check_hallucination("слово слово слово слово слово", hallucinations) is True
+
+    def test_repeated_phrase_hallucination(self, hallucinations: set[str]) -> None:
+        text = "Продолжение следует " * 5
+        assert _check_hallucination(text.strip(), hallucinations) is True
+
+    def test_normal_repetition_not_filtered(self, hallucinations: set[str]) -> None:
+        assert _check_hallucination("да да", hallucinations) is False
+        assert _check_hallucination("очень очень важно", hallucinations) is False
+        assert _check_hallucination("нет нет нет", hallucinations) is False
+
 
 class TestWhisperRecognizerInit:
     def test_default_hallucinations(self) -> None:
@@ -164,6 +179,58 @@ class TestRepetitivePattern:
     )
     def test_does_not_match_normal_text(self, text: str) -> None:
         assert not _REPETITIVE_PATTERN.search(text)
+
+
+class TestRepetitiveWordPattern:
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Creative Creative Creative Creative Creative Creative Creative",
+            "привет привет привет привет",
+            "слово слово слово слово слово",
+            "test  test\ntest\ttest",
+        ],
+    )
+    def test_matches_repeated_words(self, text: str) -> None:
+        assert _REPETITIVE_WORD_PATTERN.search(text)
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "да да",
+            "очень очень важно",
+            "нет нет нет",
+            "Привет как дела",
+            "Creative Creatively Creation",
+        ],
+    )
+    def test_does_not_match_normal_text(self, text: str) -> None:
+        assert not _REPETITIVE_WORD_PATTERN.search(text)
+
+
+class TestPhraseRepetition:
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Продолжение следует Продолжение следует Продолжение следует",
+            "thank you thank you thank you",
+            "one two three one two three one two three",
+        ],
+    )
+    def test_matches_repeated_phrases(self, text: str) -> None:
+        assert _has_phrase_repetition(text)
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Продолжение следует Продолжение следует",
+            "Привет как дела у тебя сегодня",
+            "да нет",
+            "one two one three one two",
+        ],
+    )
+    def test_does_not_match_normal_text(self, text: str) -> None:
+        assert not _has_phrase_repetition(text)
 
 
 class TestForeignScriptPattern:

@@ -15,12 +15,35 @@ logger = logging.getLogger("sheptun")
 
 _SOUND_DESCRIPTION_PATTERN = re.compile(r"^[А-ЯЁ\s]+$")
 _REPETITIVE_PATTERN = re.compile(r"(.{1,3},\s*)\1{4,}")
+_REPETITIVE_WORD_PATTERN = re.compile(r"(\b[\w]+\b)(?:\s+\1){3,}", re.UNICODE)
 _FOREIGN_SCRIPT_PATTERN = re.compile(r"[\u0370-\u03FF\u4E00-\u9FFF\u0600-\u06FF\u3040-\u30FF]")
 _BRACKET_PATTERN = re.compile(r"^\[.*\]$")
 _PAREN_PATTERN = re.compile(r"^\(.*\)$")
 _BRACE_PATTERN = re.compile(r"^\{.*\}$")
 _WHISPER_TAG_PATTERN = re.compile(r"<\|.*?\|>")
 _WARMUP_AUDIO = np.zeros(1600, dtype=np.float32)
+
+
+def _has_phrase_repetition(
+    text: str, max_phrase_len: int = 4, min_repeats: int = 3
+) -> bool:
+    words = text.split()
+    if len(words) < 6:
+        return False
+    for phrase_len in range(2, min(max_phrase_len + 1, len(words) // min_repeats + 1)):
+        for start in range(len(words) - phrase_len * min_repeats + 1):
+            phrase = tuple(words[start : start + phrase_len])
+            count = 0
+            pos = start
+            while pos + phrase_len <= len(words):
+                if tuple(words[pos : pos + phrase_len]) == phrase:
+                    count += 1
+                    pos += phrase_len
+                else:
+                    break
+            if count >= min_repeats:
+                return True
+    return False
 
 
 def is_local_model(model_name: str) -> bool:
@@ -35,6 +58,10 @@ def _check_hallucination(text: str, hallucinations: set[str]) -> bool:
     if _SOUND_DESCRIPTION_PATTERN.match(text_stripped):
         return True
     if _REPETITIVE_PATTERN.search(text_stripped):
+        return True
+    if _REPETITIVE_WORD_PATTERN.search(text_stripped):
+        return True
+    if _has_phrase_repetition(text_stripped):
         return True
     if _FOREIGN_SCRIPT_PATTERN.search(text_stripped):
         return True
