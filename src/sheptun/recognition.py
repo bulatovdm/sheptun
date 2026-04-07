@@ -22,6 +22,8 @@ _PAREN_PATTERN = re.compile(r"^\(.*\)$")
 _BRACE_PATTERN = re.compile(r"^\{.*\}$")
 _WHISPER_TAG_PATTERN = re.compile(r"<\|.*?\|>")
 _WARMUP_AUDIO = np.zeros(1600, dtype=np.float32)
+_MIN_VIABLE_WORDS = 2
+_MIN_VIABLE_CHARS = 5
 
 
 def _has_phrase_repetition(
@@ -50,10 +52,37 @@ def is_local_model(model_name: str) -> bool:
     return Path(model_name).is_dir()
 
 
-def _check_hallucination(text: str, hallucinations: set[str]) -> bool:
-    text_lower = text.lower()
-    if any(h in text_lower for h in hallucinations):
-        return True
+def _is_text_viable(text: str) -> bool:
+    cleaned = re.sub(r"[^\w]", " ", text).strip()
+    if len(cleaned) < _MIN_VIABLE_CHARS:
+        return False
+    return len(cleaned.split()) >= _MIN_VIABLE_WORDS
+
+
+def _strip_hallucinations(text: str, hallucinations: set[str]) -> str:
+    result = text.strip()
+    changed = True
+    while changed:
+        changed = False
+        result_lower = result.lower()
+        for h in hallucinations:
+            idx = result_lower.find(h)
+            if idx == -1:
+                continue
+            before = result[:idx].strip()
+            after = result[idx + len(h) :].strip()
+            if not _is_text_viable(before):
+                result = after
+                changed = True
+                break
+            if not _is_text_viable(after):
+                result = before
+                changed = True
+                break
+    return result
+
+
+def _is_garbage_pattern(text: str) -> bool:
     text_stripped = text.strip()
     if _SOUND_DESCRIPTION_PATTERN.match(text_stripped):
         return True
@@ -73,6 +102,22 @@ def _check_hallucination(text: str, hallucinations: set[str]) -> bool:
     if _PAREN_PATTERN.match(text_stripped):
         return True
     return bool(_BRACE_PATTERN.match(text_stripped))
+
+
+def _filter_hallucination(text: str, hallucinations: set[str]) -> str | None:
+    stripped = _strip_hallucinations(text, hallucinations)
+    was_stripped = stripped != text.strip()
+    if was_stripped and not _is_text_viable(stripped):
+        return None
+    if not stripped:
+        return None
+    if _is_garbage_pattern(stripped):
+        return None
+    return stripped
+
+
+def _check_hallucination(text: str, hallucinations: set[str]) -> bool:
+    return _filter_hallucination(text, hallucinations) is None
 
 
 def _bytes_to_float_array(audio_data: bytes, sample_rate: int) -> np.ndarray[Any, Any] | None:
@@ -267,9 +312,13 @@ class WhisperRecognizer(_WarmupMixin):
             logger.debug("Whisper returned empty text")
             return None
 
-        if _check_hallucination(original_text, self._hallucinations):
+        filtered = _filter_hallucination(original_text, self._hallucinations)
+        if filtered is None:
             logger.debug(f"Hallucination filtered: '{original_text}'")
             return None
+        if filtered != original_text:
+            logger.debug(f"Hallucination stripped: '{original_text}' -> '{filtered}'")
+            original_text = filtered
 
         corrected_text = _apply_spell_correction(original_text)
 
@@ -296,8 +345,11 @@ class WhisperRecognizer(_WarmupMixin):
         if not original_text:
             return None
 
-        if _check_hallucination(original_text, self._hallucinations):
+        filtered = _filter_hallucination(original_text, self._hallucinations)
+        if filtered is None:
             return None
+        if filtered != original_text:
+            original_text = filtered
 
         corrected_text = _apply_spell_correction(original_text)
 
@@ -344,8 +396,11 @@ class HuggingFaceWhisperRecognizer(_WarmupMixin):
         if not text:
             return None
 
-        if _check_hallucination(text, self._hallucinations):
+        filtered = _filter_hallucination(text, self._hallucinations)
+        if filtered is None:
             return None
+        if filtered != text:
+            text = filtered
 
         corrected = _apply_spell_correction(text)
 
@@ -522,9 +577,13 @@ class MLXWhisperRecognizer(_WarmupMixin):
             logger.debug("MLX Whisper returned empty text")
             return None
 
-        if _check_hallucination(original_text, self._hallucinations):
+        filtered = _filter_hallucination(original_text, self._hallucinations)
+        if filtered is None:
             logger.debug(f"Hallucination filtered: '{original_text}'")
             return None
+        if filtered != original_text:
+            logger.debug(f"Hallucination stripped: '{original_text}' -> '{filtered}'")
+            original_text = filtered
 
         corrected_text = _apply_spell_correction(original_text)
 

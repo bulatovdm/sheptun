@@ -4,7 +4,7 @@ from typing import Any
 
 import numpy as np
 
-from sheptun.recognition import _bytes_to_float_array, _check_hallucination, _WarmupMixin
+from sheptun.recognition import _bytes_to_float_array, _filter_hallucination, _WarmupMixin
 from sheptun.settings import settings
 from sheptun.types import RecognitionResult
 
@@ -64,8 +64,12 @@ class QwenASRRecognizer(_WarmupMixin):
             logger.debug("Qwen3-ASR returned empty text")
             return None
 
-        if _check_hallucination(text, self._hallucinations):
+        filtered = _filter_hallucination(text, self._hallucinations)
+        if filtered is None:
             logger.debug(f"Hallucination filtered: '{text}'")
             return None
+        if filtered != text:
+            logger.debug(f"Hallucination stripped: '{text}' -> '{filtered}'")
+            text = filtered
 
         return RecognitionResult(text=text, confidence=1.0)

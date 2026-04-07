@@ -11,7 +11,9 @@ from sheptun.recognition import (
     MLX_MODELS,
     _calculate_confidence,
     _check_hallucination,
+    _filter_hallucination,
     _has_phrase_repetition,
+    _strip_hallucinations,
     resolve_mlx_model,
 )
 
@@ -111,6 +113,71 @@ class TestHallucinationFiltering:
         assert _check_hallucination("да да", hallucinations) is False
         assert _check_hallucination("очень очень важно", hallucinations) is False
         assert _check_hallucination("нет нет нет", hallucinations) is False
+
+
+class TestStripHallucinations:
+    @pytest.fixture
+    def hallucinations(self) -> set[str]:
+        return {"субтитры создавал", "субтитры сделал", "продолжение следует..."}
+
+    def test_strips_prefix(self, hallucinations: set[str]) -> None:
+        text = "Субтитры создавал DimaTorzok Смотри, подготовку нужно вывести."
+        result = _strip_hallucinations(text, hallucinations)
+        assert result == "DimaTorzok Смотри, подготовку нужно вывести."
+
+    def test_strips_suffix(self, hallucinations: set[str]) -> None:
+        text = "Смотри, сортировка должна быть по названию. Субтитры сделал DimaTorzok"
+        result = _strip_hallucinations(text, hallucinations)
+        assert result == "Смотри, сортировка должна быть по названию."
+
+    def test_strips_both(self, hallucinations: set[str]) -> None:
+        text = "Субтитры создавал Важный текст для пользователя Продолжение следует..."
+        result = _strip_hallucinations(text, hallucinations)
+        assert result == "Важный текст для пользователя"
+
+    def test_pure_hallucination_returns_empty(self, hallucinations: set[str]) -> None:
+        result = _strip_hallucinations("Субтитры создавал DimaTorzok", hallucinations)
+        assert result in ("DimaTorzok", "")
+
+    def test_no_hallucination_returns_original(self, hallucinations: set[str]) -> None:
+        text = "Привет, как дела у тебя сегодня"
+        assert _strip_hallucinations(text, hallucinations) == text
+
+    def test_middle_hallucination_not_stripped(self, hallucinations: set[str]) -> None:
+        text = "Первая важная фраза. Субтитры создавал кто-то. Вторая важная фраза здесь."
+        assert _strip_hallucinations(text, hallucinations) == text
+
+
+class TestFilterHallucination:
+    @pytest.fixture
+    def hallucinations(self) -> set[str]:
+        return {"субтитры создавал", "субтитры сделал", "продолжение следует..."}
+
+    def test_pure_hallucination_returns_none(self, hallucinations: set[str]) -> None:
+        assert _filter_hallucination("Субтитры создавал DimaTorzok", hallucinations) is None
+
+    def test_prefix_hallucination_returns_cleaned(self, hallucinations: set[str]) -> None:
+        text = "Субтитры создавал DimaTorzok Смотри, подготовку нужно вывести."
+        result = _filter_hallucination(text, hallucinations)
+        assert result is not None
+        assert "Смотри" in result
+        assert "субтитры" not in result.lower()
+
+    def test_suffix_hallucination_returns_cleaned(self, hallucinations: set[str]) -> None:
+        text = "Смотри, сортировка должна быть по названию. Субтитры сделал DimaTorzok"
+        result = _filter_hallucination(text, hallucinations)
+        assert result is not None
+        assert "Смотри" in result
+        assert "субтитры" not in result.lower()
+
+    def test_pattern_garbage_still_returns_none(self, hallucinations: set[str]) -> None:
+        assert _filter_hallucination("СПОКОЙНАЯ МУЗЫКА", hallucinations) is None
+        assert _filter_hallucination("[тишина]", hallucinations) is None
+        assert _filter_hallucination("Creative " * 20, hallucinations) is None
+
+    def test_clean_text_returns_original(self, hallucinations: set[str]) -> None:
+        text = "Привет, как дела у тебя сегодня"
+        assert _filter_hallucination(text, hallucinations) == text
 
 
 class TestWhisperRecognizerInit:
