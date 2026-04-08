@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -11,7 +12,9 @@ if TYPE_CHECKING:
     from sheptun.remote import RemoteClient
 
 import AppKit
+import objc  # type: ignore[import-untyped]
 import Quartz
+from Foundation import NSObject  # type: ignore[import-untyped]
 
 logger = logging.getLogger("sheptun.keyboard")
 
@@ -45,6 +48,55 @@ kCGHIDEventTap: Any = getattr(Quartz, "kCGHIDEventTap")  # noqa: B009
 
 MAX_UNICODE_STRING_LENGTH = 20
 SHEPTUN_EVENT_MARKER = 0x534850  # "SHP" — unique marker for our events
+
+
+class _MainThreadRunner(NSObject):  # type: ignore[misc]
+    """Helper to run a callable on the main thread synchronously."""
+
+    def initWithCallable_(self, func: Callable[[], None]) -> _MainThreadRunner | None:
+        self = objc.super(_MainThreadRunner, self).init()  # type: ignore[misc]
+        if self is None:
+            return None
+        self._func = func
+        self._exception: BaseException | None = None
+        return self
+
+    def execute_(self, _sender: Any) -> None:
+        try:
+            self._func()
+        except BaseException as e:
+            self._exception = e
+
+
+def _has_running_runloop() -> bool:
+    try:
+        NSApplication: Any = getattr(AppKit, "NSApplication")  # noqa: B009
+        ns_app = NSApplication.sharedApplication()
+        return bool(ns_app and ns_app.isRunning())
+    except Exception:
+        return False
+
+
+def _run_on_main_sync(func: Callable[[], None]) -> None:
+    """Run func on the main thread, blocking until complete.
+
+    Falls back to direct call when on main thread (deadlock prevention)
+    or when no NSRunLoop is active (CLI mode).
+    """
+    if threading.current_thread() is threading.main_thread():
+        func()
+        return
+
+    if not _has_running_runloop():
+        func()
+        return
+
+    runner = _MainThreadRunner.alloc().initWithCallable_(func)
+    runner.performSelectorOnMainThread_withObject_waitUntilDone_(
+        b"execute:", None, True
+    )
+    if runner._exception is not None:
+        raise runner._exception
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,20 +238,23 @@ class MacOSKeyboardSender:
             self._send_via_events(text)
 
     def _send_via_clipboard(self, text: str) -> None:
-        logger.debug(f"Sending text via clipboard: '{text}' (len={len(text)})")
-        old_contents = self._get_clipboard()
-        old_change_count = self._pasteboard.changeCount()
+        def _inner() -> None:
+            logger.debug(f"Sending text via clipboard: '{text}' (len={len(text)})")
+            old_contents = self._get_clipboard()
+            old_change_count = self._pasteboard.changeCount()
 
-        self._set_clipboard(text)
-        time.sleep(0.05)
-        self._paste()
-        time.sleep(0.05)
+            self._set_clipboard(text)
+            time.sleep(0.05)
+            self._paste()
+            time.sleep(0.05)
 
-        if old_contents is not None:
-            self._restore_clipboard(old_contents)
-        elif self._pasteboard.changeCount() != old_change_count:
-            self._pasteboard.clearContents()
-        logger.debug("Clipboard send complete")
+            if old_contents is not None:
+                self._restore_clipboard(old_contents)
+            elif self._pasteboard.changeCount() != old_change_count:
+                self._pasteboard.clearContents()
+            logger.debug("Clipboard send complete")
+
+        _run_on_main_sync(_inner)
 
     def _get_clipboard(self) -> str | None:
         result: str | None = self._pasteboard.stringForType_(NSPasteboardTypeString)
@@ -237,11 +292,14 @@ class MacOSKeyboardSender:
         logger.debug(f"Events send complete: {len(chunks)} chunks: {chunks}")
 
     def _send_unicode_string(self, text: str) -> None:
-        key_down = CGEventCreateKeyboardEvent(self._event_source, 0, True)
-        CGEventKeyboardSetUnicodeString(key_down, len(text), text)
-        CGEventSetFlags(key_down, kCGEventFlagMaskNonCoalesced)
-        CGEventSetIntegerValueField(key_down, kCGEventSourceUserData, SHEPTUN_EVENT_MARKER)
-        CGEventPost(kCGAnnotatedSessionEventTap, key_down)
+        def _inner() -> None:
+            key_down = CGEventCreateKeyboardEvent(self._event_source, 0, True)
+            CGEventKeyboardSetUnicodeString(key_down, len(text), text)
+            CGEventSetFlags(key_down, kCGEventFlagMaskNonCoalesced)
+            CGEventSetIntegerValueField(key_down, kCGEventSourceUserData, SHEPTUN_EVENT_MARKER)
+            CGEventPost(kCGAnnotatedSessionEventTap, key_down)
+
+        _run_on_main_sync(_inner)
 
     def send_key(self, key: str) -> None:
         key_lower = key.lower()
@@ -277,15 +335,18 @@ class MacOSKeyboardSender:
         self._send_key_event(key_code.code, modifier_flags)
 
     def _send_key_event(self, key_code: int, flags: int = 0) -> None:
-        key_down = CGEventCreateKeyboardEvent(None, key_code, True)
-        key_up = CGEventCreateKeyboardEvent(None, key_code, False)
+        def _inner() -> None:
+            key_down = CGEventCreateKeyboardEvent(None, key_code, True)
+            key_up = CGEventCreateKeyboardEvent(None, key_code, False)
 
-        if flags:
-            CGEventSetFlags(key_down, flags)
-            CGEventSetFlags(key_up, flags)
+            if flags:
+                CGEventSetFlags(key_down, flags)
+                CGEventSetFlags(key_up, flags)
 
-        CGEventPost(kCGHIDEventTap, key_down)
-        CGEventPost(kCGHIDEventTap, key_up)
+            CGEventPost(kCGHIDEventTap, key_down)
+            CGEventPost(kCGHIDEventTap, key_up)
+
+        _run_on_main_sync(_inner)
 
 
 class FocusAwareKeyboardSender:

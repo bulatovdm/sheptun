@@ -1,4 +1,9 @@
-from sheptun.keyboard import KEY_CODES, MODIFIER_FLAGS, KeyCode
+import threading
+from unittest.mock import patch
+
+import pytest
+
+from sheptun.keyboard import KEY_CODES, MODIFIER_FLAGS, KeyCode, _run_on_main_sync
 
 
 class TestKeyCodes:
@@ -63,3 +68,37 @@ class TestModifierFlags:
     def test_modifier_flags_are_integers(self) -> None:
         for mod, flag in MODIFIER_FLAGS.items():
             assert isinstance(flag, int), f"Modifier '{mod}' flag should be int"
+
+
+class TestRunOnMainSync:
+    def test_calls_directly_on_main_thread(self) -> None:
+        called = False
+
+        def func() -> None:
+            nonlocal called
+            called = True
+
+        assert threading.current_thread() is threading.main_thread()
+        _run_on_main_sync(func)
+        assert called
+
+    def test_propagates_exception(self) -> None:
+        def func() -> None:
+            raise ValueError("test error")
+
+        with pytest.raises(ValueError, match="test error"):
+            _run_on_main_sync(func)
+
+    def test_fallback_without_runloop(self) -> None:
+        called_on_thread: str | None = None
+
+        def func() -> None:
+            nonlocal called_on_thread
+            called_on_thread = threading.current_thread().name
+
+        with patch("sheptun.keyboard._has_running_runloop", return_value=False):
+            t = threading.Thread(target=_run_on_main_sync, args=(func,), name="test-bg")
+            t.start()
+            t.join(timeout=5.0)
+
+        assert called_on_thread == "test-bg"
