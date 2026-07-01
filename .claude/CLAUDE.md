@@ -30,6 +30,12 @@ sheptun list-models         # Show all cached models with sizes
 sheptun cleanup-models      # Remove unused models (Whisper + HuggingFace cache)
 sheptun clear-dataset       # Clear dataset for fine-tuning
 
+# Suggest word replacements from logs via Anthropic SDK (needs pip install -e ".[llm]")
+sheptun analyze-replacements --min-confidence high          # incremental, report only
+sheptun analyze-replacements --max-iterations 5 --apply     # process N batches, write to replacements.yaml
+sheptun analyze-replacements --since 2026-06-01 --dry-run   # count windows for a date range
+sheptun analyze-replacements --reset-state                  # clear the incremental checkpoint
+
 ```
 
 ## Architecture
@@ -50,6 +56,8 @@ src/sheptun/
 ├── dataset.py      # DatasetRecorder for fine-tuning data collection
 ├── i18n.py         # Russian translations
 ├── verification.py # Transcript verification via Claude Agent SDK
+├── log_analyzer.py # LLM log analysis → replacement suggestions (Anthropic SDK)
+├── prompts/        # Prompt templates as .md files + load_prompt() loader
 ├── app_builder.py  # macOS .app bundle builder
 └── types.py        # Protocols, dataclasses, enums (AppState)
 ```
@@ -67,10 +75,24 @@ SHEPTUN_DEBUG=false
 
 Command config: `./sheptun.yaml` or `~/.config/sheptun/commands.yaml`
 
+Log analyzer (`sheptun analyze-replacements`, extra `[llm]`): `SHEPTUN_ANTHROPIC_BASE_URL`, `SHEPTUN_ANTHROPIC_API_KEY`, and `SHEPTUN_ANALYZER_*` (model, context, batch, iterations, min_freq, min_confidence, user_agent).
+
 ## Debugging
 
 - App logs: `./logs/sheptun.log` (relative to project root)
 - Crash reports: `~/Library/Logs/DiagnosticReports/Python-*.ips` (look for `com.sheptun.menubar`)
+
+## Log Analyzer (`log_analyzer.py`)
+
+LLM pipeline behind `sheptun analyze-replacements` — decomposed by SRP, each stage independently configurable:
+
+`LogParser` (extract Recognized lines only, drop noise) → `ContextWindowBuilder` (±N neighbouring Recognized lines per target, dedup + frequency, since/until filter) → `WindowBatcher` → `AnthropicClient` (Anthropic SDK, custom base_url/api_key from env) → `ReplacementAnalyzer` (orchestrates, incremental dedup) → `SuggestionWriter` (report and/or apply).
+
+- Uses the **Python `anthropic` SDK** with a custom User-Agent (default SDK UA gets blocked by some proxies; override via `SHEPTUN_ANALYZER_USER_AGENT`). No structured-output/`output_config.format` — the JSON shape is required in the prompt and parsed robustly (`_extract_items`).
+- **Incremental by default:** checkpoint (last processed timestamp) in `dataset/analyzer_state.json`. `--since`/`--until` for explicit ranges, `--full` to ignore checkpoint, `--max-iterations` to cap model requests per run (processes windows chronologically so the checkpoint advances without gaps).
+- Suggestions are written/applied **after each batch** (crash-safe), with live per-batch progress.
+- Prompts live in `prompts/*.md`, loaded via `load_prompt()`; env knobs use the `SHEPTUN_ANALYZER_` prefix.
+- The report defaults to `tmp/replacements.suggested.<timestamp>.yaml` (new file per run, never overwritten); rules carry `# freq=…, conf=…, — reason` comments. `--apply` appends the same commented rules to `replacements.yaml` (preserving existing content). `tmp/` and `dataset/` are gitignored.
 
 ## Key Patterns
 
@@ -80,6 +102,7 @@ Command config: `./sheptun.yaml` or `~/.config/sheptun/commands.yaml`
 - Hallucination filtering in `recognition.py` (configurable via `SHEPTUN_HALLUCINATIONS`)
 - Settings loaded once at import via dotenv (restart needed for changes)
 - Verification DB (`dataset/verification.db`) used by fine-tuning pipeline
+- Prompt templates in `prompts/*.md`, loaded via `load_prompt()` (editable without touching code)
 
 ## Code Style
 
@@ -109,7 +132,7 @@ Command config: `./sheptun.yaml` or `~/.config/sheptun/commands.yaml`
 
 ## Custom Agents
 
-- **analyze-logs** — Analyzes `logs/sheptun.log` to extract vocabulary for ASR optimization. Generates recommended `SHEPTUN_INITIAL_PROMPT` and word `replacements` for `sheptun.yaml`. Invoke via `@analyze-logs`.
+- **analyze-logs** — Analyzes `logs/sheptun.log` to extract vocabulary for ASR optimization. Generates recommended `SHEPTUN_INITIAL_PROMPT` and word `replacements` for `sheptun.yaml`. Invoke via `@analyze-logs`. (Distinct from the `sheptun analyze-replacements` CLI command / `log_analyzer.py`, which is a standalone Anthropic-SDK pipeline — see Log Analyzer above.)
 
 ## Git Commits
 

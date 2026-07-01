@@ -1,5 +1,6 @@
 import signal
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -209,6 +210,199 @@ def list_commands(
     console.print("\n[bold]Префиксы диктовки:[/bold]")
     for prefix in command_config.dictation_prefixes:
         console.print(f"  [green]{prefix}[/green] <текст>")
+
+
+@app.command()
+def analyze_replacements(
+    log_file: Annotated[
+        Path | None,
+        typer.Option("--log", help="Путь к логу (по умолчанию из настроек)"),
+    ] = None,
+    context: Annotated[
+        int | None,
+        typer.Option("--context", help="Число строк контекста ±N вокруг каждой строки"),
+    ] = None,
+    batch_size: Annotated[
+        int | None,
+        typer.Option("--batch-size", help="Сколько окон отправлять в одном запросе"),
+    ] = None,
+    max_windows: Annotated[
+        int | None,
+        typer.Option("--max-windows", help="Лимит окон (0 = без лимита)"),
+    ] = None,
+    min_freq: Annotated[
+        int | None,
+        typer.Option("--min-freq", help="Минимальная частота строки для анализа"),
+    ] = None,
+    min_confidence: Annotated[
+        str | None,
+        typer.Option("--min-confidence", help="Минимальная уверенность: low | medium | high"),
+    ] = None,
+    max_iterations: Annotated[
+        int | None,
+        typer.Option("--max-iterations", help="Лимит запросов к модели за прогон (0 = без лимита)"),
+    ] = None,
+    since: Annotated[
+        str | None,
+        typer.Option(
+            "--since", help="Анализировать с даты (YYYY-MM-DD[ HH:MM:SS]); игнорирует чекпоинт"
+        ),
+    ] = None,
+    until: Annotated[
+        str | None,
+        typer.Option("--until", help="Анализировать до даты включительно (YYYY-MM-DD[ HH:MM:SS])"),
+    ] = None,
+    full: Annotated[
+        bool,
+        typer.Option("--full", help="Весь лог, игнорируя чекпоинт последней сессии"),
+    ] = False,
+    reset_state: Annotated[
+        bool,
+        typer.Option("--reset-state", help="Сбросить чекпоинт и выйти"),
+    ] = False,
+    model: Annotated[
+        str | None,
+        typer.Option("--model", help="Модель Anthropic"),
+    ] = None,
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            help="Файл отчёта (по умолчанию tmp/replacements.suggested.<дата>.yaml)",
+        ),
+    ] = None,
+    apply: Annotated[
+        bool,
+        typer.Option("--apply", help="Дописать кандидатов в боевой replacements.yaml"),
+    ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Только показать число окон, без вызова модели"),
+    ] = False,
+) -> None:
+    """Анализировать лог через Anthropic Agent SDK и предложить автозамены.
+
+    По умолчанию инкрементально: обрабатывает только строки, появившиеся после
+    прошлого запуска (чекпоинт в dataset/analyzer_state.json). Флаги --since /
+    --until задают явный диапазон, --full игнорирует чекпоинт.
+    """
+    from sheptun.commands import CommandConfigLoader
+    from sheptun.log_analyzer import (
+        AnalyzerConfig,
+        AnalyzerState,
+        BatchProgress,
+        NoopClient,
+        ReplacementAnalyzer,
+        SuggestionWriter,
+        normalize_since,
+        normalize_until,
+    )
+
+    state = AnalyzerState()
+    if reset_state:
+        state.reset()
+        _success(f"Чекпоинт сброшен: {state.path}")
+        return
+
+    resolved_log = log_file or settings.log_file
+    if not resolved_log.exists():
+        _error(f"Лог не найден: {resolved_log}")
+        raise typer.Exit(1)
+
+    try:
+        resolved_since = (
+            normalize_since(since) if since else (None if full else state.last_timestamp())
+        )
+        resolved_until = normalize_until(until) if until else None
+    except ValueError as exc:
+        _error(str(exc))
+        raise typer.Exit(1) from exc
+
+    # Инкрементальный режим (без явного диапазона) → окна по времени, чтобы чекпоинт
+    # двигался после каждого батча и переживал прерывание (Ctrl+C).
+    incremental = since is None and until is None and not full
+    analyzer_config = AnalyzerConfig(
+        since=resolved_since, until=resolved_until, chronological=incremental
+    )
+    if context is not None:
+        analyzer_config.context_lines = context
+    if batch_size is not None:
+        analyzer_config.batch_size = batch_size
+    if max_windows is not None:
+        analyzer_config.max_windows = max_windows
+    if min_freq is not None:
+        analyzer_config.min_freq = min_freq
+    if min_confidence is not None:
+        analyzer_config.min_confidence = min_confidence
+    if max_iterations is not None:
+        analyzer_config.max_iterations = max_iterations
+    if model is not None:
+        analyzer_config.model = model
+
+    _info(f"Анализ лога: {resolved_log}")
+    _hint(f"Диапазон: since={resolved_since or '(начало)'}, until={resolved_until or '(конец)'}")
+
+    if dry_run:
+        analyzer = ReplacementAnalyzer(analyzer_config, client=NoopClient())
+        windows = analyzer.prepare_windows(resolved_log)
+        _info(f"Окон к анализу: {len(windows)} (контекст ±{analyzer_config.context_lines})")
+        return
+
+    # Датированное имя отчёта за прогон — файлы не перезаписываются, история копится.
+    if output is None:
+        stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        output = Path(f"tmp/replacements.suggested.{stamp}.yaml")
+
+    replacements_path = get_replacements_path()
+    existing = CommandConfigLoader.load(get_config_path(), replacements_path).replacements
+
+    analyzer = ReplacementAnalyzer(analyzer_config)
+    windows = analyzer.prepare_windows(resolved_log)
+    if not windows:
+        _info("Новых строк для анализа нет.")
+        return
+    _info(
+        f"Окон к анализу: {len(windows)}, модель: {analyzer_config.model}, "
+        f"батч: {analyzer_config.batch_size}"
+    )
+
+    writer = SuggestionWriter()
+
+    # Чекпоинт сохраняем по ходу только когда окна идут по времени и весь набор в
+    # обработке (без --max-windows) — иначе префикс не непрерывен по времени.
+    save_checkpoint = incremental and analyzer_config.max_windows == 0
+
+    def on_progress(progress: BatchProgress) -> None:
+        # После каждого батча: дописываем найденное в отчёт и (при --apply) в конфиг,
+        # плюс продвигаем чекпоинт, чтобы прерванный прогон продолжился, не начиная заново.
+        writer.append_report(progress.new_suggestions, output)
+        if apply and progress.new_suggestions:
+            writer.apply(progress.new_suggestions, replacements_path)
+        if save_checkpoint and progress.checkpoint:
+            state.save(progress.checkpoint, runs=None)
+        for s in progress.new_suggestions:
+            _hint(f'  + "{s.old}" → "{s.new}" ({s.confidence})')
+        _info(
+            f"Батч {progress.batch_index}/{progress.batch_total} · "
+            f"окон {progress.windows_done}/{len(windows)} · "
+            f"кандидатов {progress.suggestions_so_far}"
+        )
+
+    result = analyzer.analyze_windows(windows, existing, on_progress=on_progress)
+
+    if result.processed < result.total:
+        _hint(f"Обработано окон: {result.processed}/{result.total} (лимит итераций)")
+    if result.suggestions:
+        _success(f"Готово. Кандидатов: {len(result.suggestions)} → {output}")
+        if apply:
+            _success(f"Применено в {replacements_path}")
+    else:
+        _info("Готово. Новых кандидатов нет (отчёт не создавался).")
+
+    if save_checkpoint and result.checkpoint:
+        _hint(f"Чекпоинт: {result.checkpoint} → {state.path}")
+    elif incremental and not save_checkpoint:
+        _hint("Чекпоинт не обновлён (частичный прогон с --max-windows).")
 
 
 @app.command()
@@ -436,8 +630,7 @@ def list_models() -> None:
 
     if inactive_mb > 100:
         console.print(
-            f"\n[yellow]Можно освободить {inactive_mb:.0f} MB: "
-            f"sheptun cleanup-models[/yellow]"
+            f"\n[yellow]Можно освободить {inactive_mb:.0f} MB: sheptun cleanup-models[/yellow]"
         )
 
 
@@ -1020,7 +1213,9 @@ def _record_phrase(phrase_id: str, text: str, note: str, out_path: Path) -> bool
         _wait_key("  ● Запись... нажмите Enter или пробел чтобы остановить")
 
         audio_bytes = recorder.stop()
-        duration = len(audio_bytes) // (_TESTSET_SAMPLE_WIDTH * _TESTSET_CHANNELS) / _TESTSET_SAMPLE_RATE
+        duration = (
+            len(audio_bytes) // (_TESTSET_SAMPLE_WIDTH * _TESTSET_CHANNELS) / _TESTSET_SAMPLE_RATE
+        )
 
         if duration < _MIN_RECORD_DURATION:
             _error(f"Слишком коротко ({duration:.1f} сек), попробуйте снова")
@@ -1029,7 +1224,9 @@ def _record_phrase(phrase_id: str, text: str, note: str, out_path: Path) -> bool
         console.print(f"  [green]✓ Записано {duration:.1f} сек[/green]")
         console.print()
 
-        choice = _wait_key("  [Enter/пробел] сохранить  [r] перезаписать  [s] пропустить: ", {"", "r", "s"})
+        choice = _wait_key(
+            "  [Enter/пробел] сохранить  [r] перезаписать  [s] пропустить: ", {"", "r", "s"}
+        )
 
         if choice == "r":
             continue

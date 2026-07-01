@@ -47,7 +47,10 @@ htmlcov/
 # Logs
 logs/
 
-# Dataset for fine-tuning (default path)
+# Scratch/temp output (e.g. replacements.suggested.yaml report)
+tmp/
+
+# Dataset for fine-tuning (default path); also holds analyzer_state.json checkpoint
 dataset/
 
 # Fine-tuned models

@@ -4,6 +4,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from sheptun.prompts import load_prompt
+
 load_dotenv()
 
 
@@ -103,16 +105,9 @@ class Settings:
     auto_space: bool = _get_bool("SHEPTUN_AUTO_SPACE", True)  # Add leading space to text
     # Spell correction: none, t5-russian (200M)
     spell_correction: str = _get_str("SHEPTUN_SPELL_CORRECTION", "none")
-    # Whisper initial_prompt: context hint for better recognition of domain terms
-    initial_prompt: str = _get_str(
-        "SHEPTUN_INITIAL_PROMPT",
-        "Давай сделай коммит и пуш, пожалуйста. Посмотри тесты, проверь ошибки. "
-        "Добавь файл в конфиг. Запусти деплой контейнера в docker на staging. "
-        "Открой терминал, консоль. Сервер nginx на production. Скрипт на Python, "
-        "Laravel, PHP. Дебаг логи, рефакторинг модуля. Запрос к API, клиент SSH, "
-        "VPN. Фронтенд: Tailwind, Figma, Playwright. Бэкенд: JSON, SDK, LLM, "
-        "Claude. Линтер, миграция, композер. Git push, commit. VS Code, bash.",
-    )
+    # Whisper initial_prompt: context hint for better recognition of domain terms.
+    # Default text lives in prompts/whisper_initial.md; override via env.
+    initial_prompt: str = _get_str("SHEPTUN_INITIAL_PROMPT", load_prompt("whisper_initial"))
     # Recognizer: whisper, apple, mlx, parakeet, qwen
     recognizer: str = _get_str("SHEPTUN_RECOGNIZER", "whisper")
     # Apple Speech locale: ru-RU, en-US, etc
@@ -133,6 +128,22 @@ class Settings:
     finetune_warmup_steps: int = int(_get_float("SHEPTUN_FINETUNE_WARMUP_STEPS", 500))
     finetune_output: Path = _get_path("SHEPTUN_FINETUNE_OUTPUT", Path("models/whisper-sheptun"))
     finetune_min_confidence: str = _get_str("SHEPTUN_FINETUNE_MIN_CONFIDENCE", "medium")
+    # Anthropic SDK (log analyzer). Custom base_url/api_key from env.
+    anthropic_base_url: str | None = _get_optional_str("SHEPTUN_ANTHROPIC_BASE_URL")
+    anthropic_api_key: str | None = _get_optional_str("SHEPTUN_ANTHROPIC_API_KEY")
+    # Log analyzer for replacement suggestions
+    analyzer_model: str = _get_str("SHEPTUN_ANALYZER_MODEL", "claude-opus-4-8")
+    analyzer_context_lines: int = int(_get_float("SHEPTUN_ANALYZER_CONTEXT_LINES", 10))
+    analyzer_batch_size: int = int(_get_float("SHEPTUN_ANALYZER_BATCH_SIZE", 20))
+    analyzer_max_windows: int = int(_get_float("SHEPTUN_ANALYZER_MAX_WINDOWS", 0))  # 0 = no limit
+    analyzer_min_freq: int = int(_get_float("SHEPTUN_ANALYZER_MIN_FREQ", 2))
+    analyzer_effort: str = _get_str("SHEPTUN_ANALYZER_EFFORT", "high")
+    # Minimum confidence to keep a suggestion: low | medium | high
+    analyzer_min_confidence: str = _get_str("SHEPTUN_ANALYZER_MIN_CONFIDENCE", "medium")
+    # Max model requests (batches) per run — 0 = unlimited. Bounds cost/time per run.
+    analyzer_max_iterations: int = int(_get_float("SHEPTUN_ANALYZER_MAX_ITERATIONS", 0))
+    # Override User-Agent — some proxies block the default Anthropic SDK UA (empty = SDK default)
+    analyzer_user_agent: str | None = _get_optional_str("SHEPTUN_ANALYZER_USER_AGENT")
 
 
 settings = Settings()

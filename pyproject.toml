@@ -35,6 +35,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+llm = [
+    "anthropic>=0.40.0",
+]
 spelling = [
     "transformers>=4.30.0",
     "sentencepiece>=0.1.99",
@@ -80,6 +83,7 @@ allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sheptun"]
+artifacts = ["*.md", "*.yaml"]
 
 [tool.ruff]
 target-version = "py311"
@@ -155,6 +159,7 @@ module = [
     "soundfile.*",
     "librosa.*",
     "nemo.*",
+    "anthropic.*",
 ]
 ignore_missing_imports = true
 
