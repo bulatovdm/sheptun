@@ -182,6 +182,27 @@ class BatchProgress:
 ProgressCallback = Callable[[BatchProgress], None]
 
 
+@dataclass(frozen=True)
+class RetryEvent:
+    """A batch request failed and is about to be retried after ``wait`` seconds.
+
+    ``gave_up`` is True on the final event, when retries are exhausted and the run
+    stops — ``wait`` is 0 then. The CLI shows this so a long backoff pause does not
+    look like a freeze.
+    """
+
+    batch_index: int
+    batch_total: int
+    attempt: int
+    max_attempts: int
+    wait: float
+    error: str
+    gave_up: bool = False
+
+
+RetryCallback = Callable[[RetryEvent], None]
+
+
 @dataclass
 class AnalyzerConfig:
     """All tunables for one analysis run. Defaults come from settings."""
@@ -601,6 +622,7 @@ class ReplacementAnalyzer:
         windows: Sequence[ContextWindow],
         existing: dict[str, str],
         on_progress: ProgressCallback | None = None,
+        on_retry: RetryCallback | None = None,
     ) -> AnalysisResult:
         existing_keys = {k.lower() for k in existing}
         batches = self._batcher.batch(windows)
@@ -620,7 +642,7 @@ class ReplacementAnalyzer:
             if index > 1 and self._config.delay > 0:
                 time.sleep(self._config.delay)
             try:
-                raw = self._suggest_with_retry(batch, seen, index, len(batches))
+                raw = self._suggest_with_retry(batch, seen, index, len(batches), on_retry)
             except Exception:
                 # Batch still failing after all retries. Stop, but return what the
                 # earlier batches produced so the caller can persist the checkpoint —
@@ -654,14 +676,20 @@ class ReplacementAnalyzer:
         )
 
     def _suggest_with_retry(
-        self, batch: Sequence[ContextWindow], seen: set[str], index: int, total: int
+        self,
+        batch: Sequence[ContextWindow],
+        seen: set[str],
+        index: int,
+        total: int,
+        on_retry: RetryCallback | None = None,
     ) -> list[ReplacementSuggestion]:
         """Call the client, retrying a failed request with a growing backoff.
 
-        On error: log it and wait ``retry_backoff * attempt`` seconds (15, 30, 45, …),
-        then retry the SAME batch. After ``max_error_retries`` failures give up and
-        re-raise the last error so the caller stops the run (keeping earlier progress).
-        A success resets the counter. ``KeyboardInterrupt`` is never retried.
+        On error: log it (and notify ``on_retry`` so the CLI can echo it) and wait
+        ``retry_backoff * attempt`` seconds (15, 30, 45, …), then retry the SAME batch.
+        After ``max_error_retries`` failures give up and re-raise the last error so the
+        caller stops the run (keeping earlier progress). A success resets the counter.
+        ``KeyboardInterrupt`` is never retried.
         """
         attempt = 0
         while True:
@@ -677,6 +705,18 @@ class ReplacementAnalyzer:
                         self._config.max_error_retries,
                         exc,
                     )
+                    if on_retry is not None:
+                        on_retry(
+                            RetryEvent(
+                                batch_index=index,
+                                batch_total=total,
+                                attempt=attempt,
+                                max_attempts=self._config.max_error_retries,
+                                wait=0,
+                                error=str(exc),
+                                gave_up=True,
+                            )
+                        )
                     raise
                 wait = self._config.retry_backoff * attempt
                 logger.warning(
@@ -688,6 +728,17 @@ class ReplacementAnalyzer:
                     exc,
                     wait,
                 )
+                if on_retry is not None:
+                    on_retry(
+                        RetryEvent(
+                            batch_index=index,
+                            batch_total=total,
+                            attempt=attempt,
+                            max_attempts=self._config.max_error_retries,
+                            wait=wait,
+                            error=str(exc),
+                        )
+                    )
                 time.sleep(wait)
 
     def _accept_new(

@@ -14,6 +14,7 @@ from sheptun.log_analyzer import (
     PhraseIndex,
     ReplacementAnalyzer,
     ReplacementSuggestion,
+    RetryEvent,
     SuggestionWriter,
     WindowBatcher,
     _extract_items,
@@ -452,6 +453,24 @@ class TestRetryBackoff:
         assert result.interrupted is True  # gave up, but no traceback
         assert client.calls == 5  # 1 initial + 4 retries
         assert slept == [15, 30, 45, 60]  # 4 growing waits, then exit
+
+    def test_on_retry_callback_fires_per_attempt_and_on_give_up(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ) -> None:
+        monkeypatch.setattr("sheptun.log_analyzer.time.sleep", lambda _s: None)
+        events: list[RetryEvent] = []
+        client = _FlakyClient(fail_times=99)  # never recovers → retries then gives up
+        analyzer = self._analyzer(tmp_path, client, retries=2)
+        windows = analyzer.prepare_windows(log_path=tmp_path / "sheptun.log")
+
+        analyzer.analyze_windows(windows, existing={}, on_retry=events.append)
+
+        # 2 retry events (with waits) + 1 give-up event
+        assert [e.wait for e in events] == [15, 30, 0]
+        assert [e.gave_up for e in events] == [False, False, True]
+        assert all("502" in e.error for e in events)
 
 
 class TestIncrementalWriter:

@@ -337,6 +337,7 @@ def analyze_replacements(
         BatchProgress,
         NoopClient,
         ReplacementAnalyzer,
+        RetryEvent,
         SuggestionWriter,
         normalize_since,
         normalize_until,
@@ -445,7 +446,21 @@ def analyze_replacements(
             f"кандидатов {progress.suggestions_so_far}"
         )
 
-    result = analyzer.analyze_windows(windows, existing, on_progress=on_progress)
+    def on_retry(ev: RetryEvent) -> None:
+        # Эхо в консоль, чтобы длинная backoff-пауза не выглядела зависанием.
+        # Полный текст ошибки — в логе; здесь короткая выжимка.
+        brief = ev.error.splitlines()[0][:120]
+        if ev.gave_up:
+            _error(f"Батч {ev.batch_index}/{ev.batch_total} — попытки исчерпаны: {brief}")
+        else:
+            _hint(
+                f"Батч {ev.batch_index}/{ev.batch_total} — ошибка (попытка "
+                f"{ev.attempt}/{ev.max_attempts}), жду {ev.wait:.0f}с: {brief}"
+            )
+
+    result = analyzer.analyze_windows(
+        windows, existing, on_progress=on_progress, on_retry=on_retry
+    )
 
     # Прогон мог прерваться на батче (502 прокси и т.п.). Чекпоинт уже сохранён по ходу
     # в on_progress, но фиксируем финальное значение ещё раз — на случай гонок/частичного
