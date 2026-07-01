@@ -304,6 +304,79 @@ class TestCheckpointOnInterrupt:
         assert saved == [windows[0].timestamp]
 
 
+class _NetFailingClient:
+    """Raises a network-style error (proxy 502) on the Nth batch — an Exception,
+    not KeyboardInterrupt, so the analyzer must swallow it and return partial work."""
+
+    def __init__(self, fail_on: int) -> None:
+        self._fail_on = fail_on
+        self.calls = 0
+
+    def suggest(
+        self,
+        batch: Sequence[ContextWindow],  # noqa: ARG002
+        known: set[str] | None = None,  # noqa: ARG002
+    ) -> list[ReplacementSuggestion]:
+        self.calls += 1
+        if self.calls >= self._fail_on:
+            raise RuntimeError("Error code: 502 - Bad gateway")
+        return []
+
+    def set_phrase_index(self, index: PhraseIndex) -> None:
+        del index
+
+
+class TestCheckpointOnRequestError:
+    """Regression: a proxy 502 mid-run must NOT crash the analyzer with a traceback.
+    It stops early, returns a partial AnalysisResult, and keeps the checkpoint of the
+    batches that completed — so the next run resumes instead of restarting from zero.
+    This was the bug where a --since run failed and the next run began at the start."""
+
+    def _windows(self, tmp_path: Path, n: int) -> tuple[ReplacementAnalyzer, list[ContextWindow]]:
+        lines = "".join(
+            f"2026-01-{i:02d} 10:00:00,000 [INFO] Recognized: 'фраза {i}'\n" for i in range(1, n + 1)
+        )
+        log = tmp_path / "sheptun.log"
+        log.write_text(lines, encoding="utf-8")
+        config = AnalyzerConfig(context_lines=0, min_freq=1, batch_size=1, max_iterations=10)
+        return config, log
+
+    def test_error_does_not_propagate_and_keeps_progress(self, tmp_path: Path) -> None:
+        config, log = self._windows(tmp_path, n=5)
+        analyzer = ReplacementAnalyzer(config, client=_NetFailingClient(fail_on=3))
+        windows = analyzer.prepare_windows(log)
+
+        # must NOT raise — returns partial result instead of a traceback
+        result = analyzer.analyze_windows(windows, existing={})
+
+        assert result.interrupted is True
+        assert result.processed == 2  # batches 1 and 2 completed before the 502
+        # checkpoint is the last completed batch's time — the resume point
+        assert result.checkpoint == windows[1].timestamp
+
+    def test_error_on_first_batch_yields_empty_but_no_crash(self, tmp_path: Path) -> None:
+        config, log = self._windows(tmp_path, n=3)
+        analyzer = ReplacementAnalyzer(config, client=_NetFailingClient(fail_on=1))
+        windows = analyzer.prepare_windows(log)
+
+        result = analyzer.analyze_windows(windows, existing={})
+
+        assert result.interrupted is True
+        assert result.processed == 0
+        assert result.checkpoint == ""  # nothing completed → nothing to resume from
+
+    def test_clean_run_is_not_marked_interrupted(self, tmp_path: Path) -> None:
+        config, log = self._windows(tmp_path, n=3)
+        analyzer = ReplacementAnalyzer(config, client=_NetFailingClient(fail_on=99))
+        windows = analyzer.prepare_windows(log)
+
+        result = analyzer.analyze_windows(windows, existing={})
+
+        assert result.interrupted is False
+        assert result.processed == 3
+        assert result.checkpoint == windows[-1].timestamp
+
+
 class TestIncrementalWriter:
     def test_lazy_header_written_once(self, tmp_path: Path) -> None:
         report = tmp_path / "r.yaml"

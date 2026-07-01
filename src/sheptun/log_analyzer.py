@@ -153,6 +153,10 @@ class AnalysisResult:
     processed: int
     total: int
     checkpoint: str
+    # True when a batch raised (e.g. proxy 502) and the run stopped early. The
+    # result still holds the progress from the batches that DID complete, so the
+    # caller persists the checkpoint instead of losing everything to a traceback.
+    interrupted: bool = False
 
 
 @dataclass(frozen=True)
@@ -602,8 +606,16 @@ class ReplacementAnalyzer:
         processed: list[ContextWindow] = []
 
         running_checkpoint = ""
+        interrupted = False
         for index, batch in enumerate(batches, start=1):
-            raw = self._client.suggest(batch, known=set(seen))
+            try:
+                raw = self._client.suggest(batch, known=set(seen))
+            except Exception:
+                # A batch failed (proxy 502, timeout, …). Stop, but return what the
+                # earlier batches produced so the caller can still persist the
+                # checkpoint — otherwise the whole run's progress is lost to a traceback.
+                interrupted = True
+                break
             fresh = self._accept_new(raw, threshold, seen)
             accepted.extend(fresh)
             processed.extend(batch)
@@ -622,12 +634,12 @@ class ReplacementAnalyzer:
                     )
                 )
 
-        checkpoint = running_checkpoint
         return AnalysisResult(
             suggestions=accepted,
             processed=len(processed),
             total=len(windows),
-            checkpoint=checkpoint,
+            checkpoint=running_checkpoint,
+            interrupted=interrupted,
         )
 
     def _accept_new(

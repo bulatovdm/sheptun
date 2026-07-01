@@ -325,11 +325,13 @@ def analyze_replacements(
         _error(str(exc))
         raise typer.Exit(1) from exc
 
-    # Инкрементальный режим (без явного диапазона) → окна по времени, чтобы чекпоинт
-    # двигался после каждого батча и переживал прерывание (Ctrl+C).
-    incremental = since is None and until is None and not full
+    # Чекпоинт можно двигать (и переживать прерывание/сбой) на любом непрерывном
+    # хронологическом ПРЕФИКСЕ лога снизу: инкрементальный режим и --since оба такие
+    # (--since лишь поднимает нижнюю границу). --until оставляет открытый верх, поэтому
+    # префикс уже не «до конца» — там чекпоинт не сохраняем, чтобы не перепрыгнуть хвост.
+    chronological = until is None and not full
     analyzer_config = AnalyzerConfig(
-        since=resolved_since, until=resolved_until, chronological=incremental
+        since=resolved_since, until=resolved_until, chronological=chronological
     )
     if context is not None:
         analyzer_config.context_lines = context
@@ -379,7 +381,7 @@ def analyze_replacements(
 
     # Чекпоинт сохраняем по ходу только когда окна идут по времени и весь набор в
     # обработке (без --max-windows) — иначе префикс не непрерывен по времени.
-    save_checkpoint = incremental and analyzer_config.max_windows == 0
+    save_checkpoint = chronological and analyzer_config.max_windows == 0
 
     def on_progress(progress: BatchProgress) -> None:
         # После каждого батча: дописываем найденное в отчёт и (при --apply) в конфиг,
@@ -399,18 +401,29 @@ def analyze_replacements(
 
     result = analyzer.analyze_windows(windows, existing, on_progress=on_progress)
 
-    if result.processed < result.total:
+    # Прогон мог прерваться на батче (502 прокси и т.п.). Чекпоинт уже сохранён по ходу
+    # в on_progress, но фиксируем финальное значение ещё раз — на случай гонок/частичного
+    # прохода — и сообщаем понятно, откуда продолжать, вместо трейсбека.
+    if save_checkpoint and result.checkpoint:
+        state.save(result.checkpoint, runs=None)
+
+    if result.interrupted:
+        _error("Прогон прерван ошибкой запроса (напр. 502 прокси). Обработано не всё.")
+        if save_checkpoint and result.checkpoint:
+            _success(f"Прогресс сохранён. Продолжить: --since «{result.checkpoint}»")
+
+    if result.processed < result.total and not result.interrupted:
         _hint(f"Обработано окон: {result.processed}/{result.total} (лимит итераций)")
     if result.suggestions:
-        _success(f"Готово. Кандидатов: {len(result.suggestions)} → {output}")
+        _success(f"Кандидатов: {len(result.suggestions)} → {output}")
         if apply:
             _success(f"Применено в {replacements_path}")
-    else:
+    elif not result.interrupted:
         _info("Готово. Новых кандидатов нет (отчёт не создавался).")
 
-    if save_checkpoint and result.checkpoint:
+    if save_checkpoint and result.checkpoint and not result.interrupted:
         _hint(f"Чекпоинт: {result.checkpoint} → {state.path}")
-    elif incremental and not save_checkpoint:
+    elif not save_checkpoint and chronological:
         _hint("Чекпоинт не обновлён (частичный прогон с --max-windows).")
 
 
