@@ -11,6 +11,7 @@ from sheptun.log_analyzer import (
     ContextWindow,
     ContextWindowBuilder,
     LogParser,
+    PhraseIndex,
     ReplacementAnalyzer,
     ReplacementSuggestion,
     SuggestionWriter,
@@ -97,6 +98,7 @@ class _FakeClient:
     def __init__(self, suggestions: list[ReplacementSuggestion]) -> None:
         self._suggestions = suggestions
         self.calls = 0
+        self.index: PhraseIndex | None = None
 
     def suggest(
         self,
@@ -105,6 +107,9 @@ class _FakeClient:
     ) -> list[ReplacementSuggestion]:
         self.calls += 1
         return self._suggestions
+
+    def set_phrase_index(self, index: PhraseIndex) -> None:
+        self.index = index
 
 
 class TestReplacementAnalyzer:
@@ -224,6 +229,9 @@ class _FailingClient:
         if self.calls >= self._fail_on:
             raise KeyboardInterrupt("interrupted mid-run")
         return []
+
+    def set_phrase_index(self, index: PhraseIndex) -> None:
+        del index
 
 
 class TestCheckpointNoSkip:
@@ -385,6 +393,7 @@ class TestVerifyStage:
         c._model = "m"  # type: ignore[attr-defined]
         c._effort = "high"  # type: ignore[attr-defined]
         c._verify = verify  # type: ignore[attr-defined]
+        c._phrase_index = None  # type: ignore[attr-defined]
         replies = iter(ask_replies)
         c._ask = lambda *_args: next(replies)  # type: ignore[attr-defined,assignment]
         return c
@@ -415,6 +424,80 @@ class TestVerifyStage:
         client.suggest(batch, known={"комит", "докер"})
         assert "УЖЕ ПОКРЫТЫЕ ОШИБКИ" in captured["user"]
         assert "комит" in captured["user"] and "докер" in captured["user"]
+
+
+class TestPhraseIndex:
+    """Frequency lookup over the actual Recognized lines."""
+
+    def test_counts_lines_containing_phrase(self) -> None:
+        index = PhraseIndex(["сделай комит", "ещё комит тут", "открой докер"])
+        assert index.frequency("комит") == 2
+        assert index.frequency("докер") == 1
+
+    def test_case_insensitive(self) -> None:
+        index = PhraseIndex(["Открой Докер"])
+        assert index.frequency("докер") == 1
+        assert index.frequency("ДОКЕР") == 1
+
+    def test_absent_phrase_is_zero(self) -> None:
+        index = PhraseIndex(["сделай комит"])
+        assert index.frequency("медлвары") == 0
+
+    def test_empty_phrase_is_zero(self) -> None:
+        assert PhraseIndex(["что-то"]).frequency("   ") == 0
+
+
+class TestPhraseIndexGuardsSuggestions:
+    """The client uses the index to fix frequency and drop hallucinations."""
+
+    def _client(self, gen: str, index: PhraseIndex | None) -> "AnthropicClient":
+        c = AnthropicClient.__new__(AnthropicClient)
+        c._model = "m"  # type: ignore[attr-defined]
+        c._effort = "high"  # type: ignore[attr-defined]
+        c._verify = False  # type: ignore[attr-defined]
+        c._phrase_index = index  # type: ignore[attr-defined]
+        c._ask = lambda *_args: gen  # type: ignore[attr-defined,assignment]
+        return c
+
+    def test_drops_old_absent_from_log(self) -> None:
+        # 'медлвары' never appears in any Recognized line -> hallucination -> dropped
+        gen = '[{"old": "медлвары", "new": "middleware", "confidence": "high", "reason": ""}]'
+        index = PhraseIndex(["говорю про медлвару"])  # only 'медлвару', not 'медлвары'
+        client = self._client(gen, index)
+        batch = [ContextWindow(target="x", before=(), after=(), frequency=99)]
+        assert client.suggest(batch) == []
+
+    def test_frequency_is_per_word_not_batch_max(self) -> None:
+        gen = '[{"old": "комит", "new": "коммит", "confidence": "high", "reason": ""}]'
+        index = PhraseIndex(["сделай комит", "ещё комит"])  # 'комит' in 2 lines
+        client = self._client(gen, index)
+        # batch frequency is a misleading 454; the real per-word count is 2
+        batch = [ContextWindow(target="x", before=(), after=(), frequency=454)]
+        result = client.suggest(batch)
+        assert len(result) == 1
+        assert result[0].frequency == 2  # honest count, not the batch max
+
+    def test_without_index_keeps_batch_frequency(self) -> None:
+        gen = '[{"old": "комит", "new": "коммит", "confidence": "high", "reason": ""}]'
+        client = self._client(gen, index=None)
+        batch = [ContextWindow(target="x", before=(), after=(), frequency=7)]
+        result = client.suggest(batch)
+        assert result[0].frequency == 7  # fallback: no index, batch max stands
+
+    def test_analyzer_wires_index_from_log(self, log_path: Path) -> None:
+        # end-to-end: prepare_windows must hand the client a working index
+        gen = (
+            '[{"old": "комит", "new": "коммит", "confidence": "high", "reason": ""},'
+            ' {"old": "выдумка", "new": "нечто", "confidence": "high", "reason": ""}]'
+        )
+        client = self._client(gen, index=None)
+        config = AnalyzerConfig(context_lines=1, min_freq=1, batch_size=10)
+        analyzer = ReplacementAnalyzer(config, client=client)
+        result = analyzer.analyze(log_path, existing={})
+        olds = {s.old for s in result.suggestions}
+        assert olds == {"комит"}  # 'выдумка' absent from the log -> dropped
+        komit = next(s for s in result.suggestions if s.old == "комит")
+        assert komit.frequency == 2  # 'сделай комит' appears twice in SAMPLE_LOG
 
 
 class TestSuggestionWriter:

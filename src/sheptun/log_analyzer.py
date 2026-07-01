@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Protocol
 
 import yaml
@@ -24,7 +24,7 @@ from sheptun.prompts import load_prompt
 from sheptun.settings import settings
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Sequence
     from pathlib import Path
 
 _DEFAULT_USER_AGENT = (
@@ -84,6 +84,28 @@ class LogEntry:
 
     timestamp: str
     text: str
+
+
+class PhraseIndex:
+    """Case-insensitive frequency lookup over the actual Recognized lines.
+
+    Backs two guards against the model inventing rules: a suggested ``old`` that
+    appears in NO Recognized line is a hallucination and must be dropped; one that
+    does appear gets its real occurrence count (not a batch-wide maximum).
+
+    ``frequency`` counts Recognized lines that *contain* the phrase as a substring,
+    so an inflected/shorter ``old`` (e.g. "комит" inside "сделай комит") still
+    matches the line it came from.
+    """
+
+    def __init__(self, texts: Iterable[str]) -> None:
+        self._lines = tuple(t.lower() for t in texts)
+
+    def frequency(self, phrase: str) -> int:
+        needle = phrase.lower().strip()
+        if not needle:
+            return 0
+        return sum(1 for line in self._lines if needle in line)
 
 
 @dataclass(frozen=True)
@@ -381,14 +403,25 @@ class SuggestClient(Protocol):
         self, batch: Sequence[ContextWindow], known: set[str] | None = None
     ) -> list[ReplacementSuggestion]: ...
 
+    def set_phrase_index(self, index: PhraseIndex) -> None:
+        """Wire the log frequency index (built once the log is parsed)."""
+        ...
+
 
 class AnthropicClient:
     """Thin wrapper over the Anthropic SDK returning structured suggestions."""
 
-    def __init__(self, model: str, effort: str, verify: bool = False) -> None:
+    def __init__(
+        self,
+        model: str,
+        effort: str,
+        verify: bool = False,
+        phrase_index: PhraseIndex | None = None,
+    ) -> None:
         self._model = model
         self._effort = effort
         self._verify = verify
+        self._phrase_index = phrase_index
         self._client = self._make_client()
 
     @staticmethod
@@ -413,15 +446,34 @@ class AnthropicClient:
         text = self._ask(
             load_prompt(REPLACEMENTS_PROMPT_NAME), self._build_prompt(batch, known or set())
         )
-        max_freq = max((w.frequency for w in batch), default=1)
+        # Fallback only when no index is wired: the batch-wide max is a coarse
+        # over-estimate, but it keeps stand-alone client usage working.
+        batch_freq = max((w.frequency for w in batch), default=1)
         suggestions = [
             s
             for item in _extract_items(text)
-            if (s := _normalize_item(item, max_freq)) is not None
+            if (s := self._resolve(_normalize_item(item, batch_freq))) is not None
         ]
         if self._verify and suggestions:
             suggestions = self._verify_suggestions(suggestions)
         return suggestions
+
+    def _resolve(self, suggestion: ReplacementSuggestion | None) -> ReplacementSuggestion | None:
+        """Attach the real per-word frequency and drop hallucinated ``old``s.
+
+        Without an index, pass through unchanged (frequency stays the batch max).
+        With one, an ``old`` absent from every Recognized line is dropped, and a
+        present one carries its true occurrence count.
+        """
+        if suggestion is None or self._phrase_index is None:
+            return suggestion
+        freq = self._phrase_index.frequency(suggestion.old)
+        if freq == 0:
+            return None
+        return replace(suggestion, frequency=freq)
+
+    def set_phrase_index(self, index: PhraseIndex) -> None:
+        self._phrase_index = index
 
     def _ask(self, system: str, user: str) -> str:
         """One model call; returns the text of the first text block."""
@@ -475,6 +527,9 @@ class NoopClient:
         del batch, known  # dry-run stub — never calls the API
         return []
 
+    def set_phrase_index(self, index: PhraseIndex) -> None:
+        del index  # dry-run stub — nothing to index
+
 
 class ReplacementAnalyzer:
     """Orchestrates the pipeline and dedups against existing rules."""
@@ -503,6 +558,9 @@ class ReplacementAnalyzer:
 
     def prepare_windows(self, log_path: Path) -> list[ContextWindow]:
         entries = self._parser.parse(log_path)
+        # Real per-word frequencies over every Recognized line — lets the client
+        # reject a hallucinated ``old`` and stamp the true count on the rest.
+        self._client.set_phrase_index(PhraseIndex(e.text for e in entries))
         windows = self._window_builder.build(entries)
         # Chronological order lets the checkpoint advance contiguously (and survive
         # interruption). An iteration cap forces it too, since it processes a prefix.
