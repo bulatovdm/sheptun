@@ -144,8 +144,14 @@ class Settings:
     analyzer_max_iterations: int = int(_get_float("SHEPTUN_ANALYZER_MAX_ITERATIONS", 0))
     # Second verification pass: a critic call re-checks candidates (extra request per batch).
     analyzer_verify: bool = _get_bool("SHEPTUN_ANALYZER_VERIFY", True)
-    # SDK request retries on error — 0 = fail fast (no backoff), surface proxy errors immediately.
+    # SDK-level retries per request — 0 = fail fast; our own backoff loop handles retries instead.
     analyzer_max_retries: int = int(_get_float("SHEPTUN_ANALYZER_MAX_RETRIES", 0))
+    # Pause (seconds) between successful model requests — eases load on the proxy/origin (502s).
+    analyzer_delay: float = _get_float("SHEPTUN_ANALYZER_DELAY", 0.5)
+    # On a request error: wait backoff*attempt seconds (15, 30, 45, …) and retry the same batch.
+    analyzer_retry_backoff: float = _get_float("SHEPTUN_ANALYZER_RETRY_BACKOFF", 15.0)
+    # How many times to retry a failing batch before giving up and stopping the run.
+    analyzer_max_error_retries: int = int(_get_float("SHEPTUN_ANALYZER_MAX_ERROR_RETRIES", 4))
     # Override User-Agent — some proxies block the default Anthropic SDK UA (empty = SDK default)
     analyzer_user_agent: str | None = _get_optional_str("SHEPTUN_ANALYZER_USER_AGENT")
 

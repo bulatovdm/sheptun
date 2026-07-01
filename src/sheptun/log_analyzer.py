@@ -13,7 +13,9 @@ Pipeline (each stage is a separate, independently configurable component):
 from __future__ import annotations
 
 import json
+import logging
 import re
+import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Protocol
@@ -22,6 +24,8 @@ import yaml
 
 from sheptun.prompts import load_prompt
 from sheptun.settings import settings
+
+logger = logging.getLogger("sheptun.analyzer")
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -191,6 +195,9 @@ class AnalyzerConfig:
     min_confidence: str = field(default_factory=lambda: settings.analyzer_min_confidence)
     max_iterations: int = field(default_factory=lambda: settings.analyzer_max_iterations)
     verify: bool = field(default_factory=lambda: settings.analyzer_verify)
+    delay: float = field(default_factory=lambda: settings.analyzer_delay)
+    retry_backoff: float = field(default_factory=lambda: settings.analyzer_retry_backoff)
+    max_error_retries: int = field(default_factory=lambda: settings.analyzer_max_error_retries)
     since: str | None = None  # only target lines with timestamp > since
     until: str | None = None  # only target lines with timestamp <= until
     # Process windows oldest-first so the checkpoint advances contiguously and
@@ -608,12 +615,16 @@ class ReplacementAnalyzer:
         running_checkpoint = ""
         interrupted = False
         for index, batch in enumerate(batches, start=1):
+            # Pause between requests (not before the first) to ease load on the
+            # proxy/origin — a gap-less stream of 3600+ calls overloads it (502s).
+            if index > 1 and self._config.delay > 0:
+                time.sleep(self._config.delay)
             try:
-                raw = self._client.suggest(batch, known=set(seen))
+                raw = self._suggest_with_retry(batch, seen, index, len(batches))
             except Exception:
-                # A batch failed (proxy 502, timeout, …). Stop, but return what the
-                # earlier batches produced so the caller can still persist the
-                # checkpoint — otherwise the whole run's progress is lost to a traceback.
+                # Batch still failing after all retries. Stop, but return what the
+                # earlier batches produced so the caller can persist the checkpoint —
+                # otherwise the whole run's progress is lost to a traceback.
                 interrupted = True
                 break
             fresh = self._accept_new(raw, threshold, seen)
@@ -641,6 +652,43 @@ class ReplacementAnalyzer:
             checkpoint=running_checkpoint,
             interrupted=interrupted,
         )
+
+    def _suggest_with_retry(
+        self, batch: Sequence[ContextWindow], seen: set[str], index: int, total: int
+    ) -> list[ReplacementSuggestion]:
+        """Call the client, retrying a failed request with a growing backoff.
+
+        On error: log it and wait ``retry_backoff * attempt`` seconds (15, 30, 45, …),
+        then retry the SAME batch. After ``max_error_retries`` failures give up and
+        re-raise the last error so the caller stops the run (keeping earlier progress).
+        A success resets the counter. ``KeyboardInterrupt`` is never retried.
+        """
+        attempt = 0
+        while True:
+            try:
+                return self._client.suggest(batch, known=set(seen))
+            except Exception as exc:
+                attempt += 1
+                if attempt > self._config.max_error_retries:
+                    logger.error(
+                        "Батч %d/%d — ошибка запроса, попытки исчерпаны (%d): %s",
+                        index,
+                        total,
+                        self._config.max_error_retries,
+                        exc,
+                    )
+                    raise
+                wait = self._config.retry_backoff * attempt
+                logger.warning(
+                    "Батч %d/%d — ошибка запроса (попытка %d/%d): %s. Жду %.0fс и повторяю.",
+                    index,
+                    total,
+                    attempt,
+                    self._config.max_error_retries,
+                    exc,
+                    wait,
+                )
+                time.sleep(wait)
 
     def _accept_new(
         self,

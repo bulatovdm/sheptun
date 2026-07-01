@@ -338,7 +338,17 @@ class TestCheckpointOnRequestError:
         )
         log = tmp_path / "sheptun.log"
         log.write_text(lines, encoding="utf-8")
-        config = AnalyzerConfig(context_lines=0, min_freq=1, batch_size=1, max_iterations=10)
+        # delay/backoff/retries=0 → no real sleeps, no retries: these tests assert the
+        # give-up path. Retry behaviour is covered separately in TestRetryBackoff.
+        config = AnalyzerConfig(
+            context_lines=0,
+            min_freq=1,
+            batch_size=1,
+            max_iterations=10,
+            delay=0,
+            retry_backoff=0,
+            max_error_retries=0,
+        )
         return config, log
 
     def test_error_does_not_propagate_and_keeps_progress(self, tmp_path: Path) -> None:
@@ -375,6 +385,73 @@ class TestCheckpointOnRequestError:
         assert result.interrupted is False
         assert result.processed == 3
         assert result.checkpoint == windows[-1].timestamp
+
+
+class _FlakyClient:
+    """Fails the first ``fail_times`` suggest() calls, then succeeds — models a
+    proxy that returns 502 a few times before the origin recovers."""
+
+    def __init__(self, fail_times: int) -> None:
+        self._fail_times = fail_times
+        self.calls = 0
+
+    def suggest(
+        self,
+        batch: Sequence[ContextWindow],  # noqa: ARG002
+        known: set[str] | None = None,  # noqa: ARG002
+    ) -> list[ReplacementSuggestion]:
+        self.calls += 1
+        if self.calls <= self._fail_times:
+            raise RuntimeError("Error code: 502 - Bad gateway")
+        return []
+
+    def set_phrase_index(self, index: PhraseIndex) -> None:
+        del index
+
+
+class TestRetryBackoff:
+    """A failing batch is retried with a growing backoff before giving up."""
+
+    def _analyzer(self, tmp_path: Path, client: object, retries: int) -> ReplacementAnalyzer:
+        log = tmp_path / "sheptun.log"
+        log.write_text("2026-01-01 10:00:00,000 [INFO] Recognized: 'фраза'\n", encoding="utf-8")
+        config = AnalyzerConfig(
+            context_lines=0,
+            min_freq=1,
+            batch_size=1,
+            max_iterations=10,
+            delay=0,
+            retry_backoff=15,
+            max_error_retries=retries,
+        )
+        return ReplacementAnalyzer(config, client=client)  # type: ignore[arg-type]
+
+    def test_recovers_after_transient_errors(self, tmp_path: Path, monkeypatch) -> None:
+        slept: list[float] = []
+        monkeypatch.setattr("sheptun.log_analyzer.time.sleep", slept.append)
+        client = _FlakyClient(fail_times=2)  # fail twice, then succeed
+        analyzer = self._analyzer(tmp_path, client, retries=4)
+        windows = analyzer.prepare_windows(log_path=tmp_path / "sheptun.log")
+
+        result = analyzer.analyze_windows(windows, existing={})
+
+        assert result.interrupted is False  # recovered, run completed
+        assert result.processed == 1
+        assert client.calls == 3  # 2 failures + 1 success
+        assert slept == [15, 30]  # backoff grew: 15*1, 15*2
+
+    def test_gives_up_after_max_retries(self, tmp_path: Path, monkeypatch) -> None:
+        slept: list[float] = []
+        monkeypatch.setattr("sheptun.log_analyzer.time.sleep", slept.append)
+        client = _FlakyClient(fail_times=99)  # never recovers
+        analyzer = self._analyzer(tmp_path, client, retries=4)
+        windows = analyzer.prepare_windows(log_path=tmp_path / "sheptun.log")
+
+        result = analyzer.analyze_windows(windows, existing={})
+
+        assert result.interrupted is True  # gave up, but no traceback
+        assert client.calls == 5  # 1 initial + 4 retries
+        assert slept == [15, 30, 45, 60]  # 4 growing waits, then exit
 
 
 class TestIncrementalWriter:

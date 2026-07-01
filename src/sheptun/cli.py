@@ -1,3 +1,4 @@
+import logging
 import signal
 import sys
 from datetime import datetime
@@ -38,6 +39,28 @@ def _error(msg: str) -> None:
 
 def _hint(msg: str) -> None:
     console.print(f"[dim]{msg}[/dim]")
+
+
+def _setup_analyzer_logging(source_log: Path) -> Path:
+    """Route the analyzer logger to its OWN file next to the source log.
+
+    Kept separate from sheptun.log because the analyzer parses that file — writing
+    its own warnings there would pollute future analysis input.
+    """
+    analyzer_log = source_log.parent / "analyzer.log"
+    analyzer_log.parent.mkdir(parents=True, exist_ok=True)
+    logger = logging.getLogger("sheptun.analyzer")
+    already = any(
+        isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", "") == str(analyzer_log)
+        for h in logger.handlers
+    )
+    if not already:
+        handler = logging.FileHandler(analyzer_log, encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+        logger.propagate = False  # don't leak into the root sheptun.log handler
+    return analyzer_log
 
 
 @app.command()
@@ -249,6 +272,20 @@ def analyze_replacements(
             help="Второй проход-критик, перепроверяющий кандидатов (по умолчанию вкл)",
         ),
     ] = None,
+    delay: Annotated[
+        float | None,
+        typer.Option("--delay", help="Пауза (сек) между запросами к модели"),
+    ] = None,
+    retry_backoff: Annotated[
+        float | None,
+        typer.Option(
+            "--retry-backoff", help="Базовый шаг паузы при ошибке (backoff×попытка: 15,30,45…)"
+        ),
+    ] = None,
+    max_error_retries: Annotated[
+        int | None,
+        typer.Option("--max-error-retries", help="Сколько раз повторять сбойный батч до выхода"),
+    ] = None,
     since: Annotated[
         str | None,
         typer.Option(
@@ -316,6 +353,9 @@ def analyze_replacements(
         _error(f"Лог не найден: {resolved_log}")
         raise typer.Exit(1)
 
+    # Логи анализатора — в ОТДЕЛЬНЫЙ файл (не в sheptun.log, который анализатор же и парсит).
+    analyzer_log = _setup_analyzer_logging(resolved_log)
+
     try:
         resolved_since = (
             normalize_since(since) if since else (None if full else state.last_timestamp())
@@ -347,6 +387,12 @@ def analyze_replacements(
         analyzer_config.max_iterations = max_iterations
     if verify is not None:
         analyzer_config.verify = verify
+    if delay is not None:
+        analyzer_config.delay = delay
+    if retry_backoff is not None:
+        analyzer_config.retry_backoff = retry_backoff
+    if max_error_retries is not None:
+        analyzer_config.max_error_retries = max_error_retries
     if model is not None:
         analyzer_config.model = model
 
@@ -409,6 +455,7 @@ def analyze_replacements(
 
     if result.interrupted:
         _error("Прогон прерван ошибкой запроса (напр. 502 прокси). Обработано не всё.")
+        _hint(f"Детали ошибки — в {analyzer_log}")
         if save_checkpoint and result.checkpoint:
             _success(f"Прогресс сохранён. Продолжить: --since «{result.checkpoint}»")
 
