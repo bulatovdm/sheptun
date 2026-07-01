@@ -142,6 +142,8 @@ class Settings:
     analyzer_min_confidence: str = _get_str("SHEPTUN_ANALYZER_MIN_CONFIDENCE", "medium")
     # Max model requests (batches) per run — 0 = unlimited. Bounds cost/time per run.
     analyzer_max_iterations: int = int(_get_float("SHEPTUN_ANALYZER_MAX_ITERATIONS", 0))
+    # Second verification pass: a critic call re-checks candidates (extra request per batch).
+    analyzer_verify: bool = _get_bool("SHEPTUN_ANALYZER_VERIFY", True)
     # Override User-Agent — some proxies block the default Anthropic SDK UA (empty = SDK default)
     analyzer_user_agent: str | None = _get_optional_str("SHEPTUN_ANALYZER_USER_AGENT")
 

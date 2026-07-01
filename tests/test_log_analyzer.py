@@ -6,6 +6,7 @@ import pytest
 from sheptun.log_analyzer import (
     AnalyzerConfig,
     AnalyzerState,
+    AnthropicClient,
     BatchProgress,
     ContextWindow,
     ContextWindowBuilder,
@@ -365,6 +366,38 @@ class TestResponseParsing:
 
     def test_normalize_rejects_noop(self) -> None:
         assert _normalize_item({"old": "docker", "new": "Docker"}, frequency=1) is None
+
+
+class TestVerifyStage:
+    """Second-pass critic drops candidates it marks 'reject'."""
+
+    def _client(self, verify: bool, ask_replies: list[str]) -> "AnthropicClient":
+        # build without __init__ so we don't touch the real SDK
+        c = AnthropicClient.__new__(AnthropicClient)
+        c._model = "m"  # type: ignore[attr-defined]
+        c._effort = "high"  # type: ignore[attr-defined]
+        c._verify = verify  # type: ignore[attr-defined]
+        replies = iter(ask_replies)
+        c._ask = lambda *_args: next(replies)  # type: ignore[attr-defined,assignment]
+        return c
+
+    def test_reject_drops_candidate(self) -> None:
+        gen = '[{"old": "комит", "new": "коммит", "confidence": "high", "reason": ""}, '
+        gen += '{"old": "курсор", "new": "Cursor", "confidence": "high", "reason": ""}]'
+        verify = '[{"old": "комит", "new": "коммит", "verdict": "keep"}, '
+        verify += '{"old": "курсор", "new": "Cursor", "verdict": "reject"}]'
+        client = self._client(verify=True, ask_replies=[gen, verify])
+        batch = [ContextWindow(target="x", before=(), after=(), frequency=5)]
+        result = client.suggest(batch)
+        olds = {s.old for s in result}
+        assert olds == {"комит"}  # 'курсор' rejected by the critic
+
+    def test_no_verify_keeps_all(self) -> None:
+        gen = '[{"old": "курсор", "new": "Cursor", "confidence": "high", "reason": ""}]'
+        client = self._client(verify=False, ask_replies=[gen])
+        batch = [ContextWindow(target="x", before=(), after=(), frequency=5)]
+        result = client.suggest(batch)
+        assert {s.old for s in result} == {"курсор"}  # no second pass, kept
 
 
 class TestSuggestionWriter:

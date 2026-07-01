@@ -50,6 +50,10 @@ logs/
 # Scratch/temp output (e.g. replacements.suggested.yaml report)
 tmp/
 
+# Replacement review artifacts (draft, not for commit)
+replacements.check.yaml
+REPLACEMENTS_REVIEW.md
+
 # Dataset for fine-tuning (default path); also holds analyzer_state.json checkpoint
 dataset/
 

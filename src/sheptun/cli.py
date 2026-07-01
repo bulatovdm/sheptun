@@ -242,6 +242,13 @@ def analyze_replacements(
         int | None,
         typer.Option("--max-iterations", help="Лимит запросов к модели за прогон (0 = без лимита)"),
     ] = None,
+    verify: Annotated[
+        bool | None,
+        typer.Option(
+            "--verify/--no-verify",
+            help="Второй проход-критик, перепроверяющий кандидатов (по умолчанию вкл)",
+        ),
+    ] = None,
     since: Annotated[
         str | None,
         typer.Option(
@@ -336,6 +343,8 @@ def analyze_replacements(
         analyzer_config.min_confidence = min_confidence
     if max_iterations is not None:
         analyzer_config.max_iterations = max_iterations
+    if verify is not None:
+        analyzer_config.verify = verify
     if model is not None:
         analyzer_config.model = model
 

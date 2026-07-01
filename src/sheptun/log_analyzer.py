@@ -36,6 +36,7 @@ _RECOGNIZED_PATTERN = re.compile(r"Recognized: '(?P<text>.*)'\s*$")
 _TIMESTAMP_PATTERN = re.compile(r"^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})")
 REPLACEMENTS_PROMPT_NAME = "replacements_system"
 USER_INTRO_PROMPT_NAME = "replacements_user_intro"
+VERIFY_PROMPT_NAME = "replacements_verify"
 
 _DATE_ONLY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _DATE_TIME = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$")
@@ -159,6 +160,7 @@ class AnalyzerConfig:
     effort: str = field(default_factory=lambda: settings.analyzer_effort)
     min_confidence: str = field(default_factory=lambda: settings.analyzer_min_confidence)
     max_iterations: int = field(default_factory=lambda: settings.analyzer_max_iterations)
+    verify: bool = field(default_factory=lambda: settings.analyzer_verify)
     since: str | None = None  # only target lines with timestamp > since
     until: str | None = None  # only target lines with timestamp <= until
     # Process windows oldest-first so the checkpoint advances contiguously and
@@ -377,9 +379,10 @@ class SuggestClient(Protocol):
 class AnthropicClient:
     """Thin wrapper over the Anthropic SDK returning structured suggestions."""
 
-    def __init__(self, model: str, effort: str) -> None:
+    def __init__(self, model: str, effort: str, verify: bool = False) -> None:
         self._model = model
         self._effort = effort
+        self._verify = verify
         self._client = self._make_client()
 
     @staticmethod
@@ -399,21 +402,43 @@ class AnthropicClient:
         )
 
     def suggest(self, batch: Sequence[ContextWindow]) -> list[ReplacementSuggestion]:
-        prompt = self._build_prompt(batch)
+        text = self._ask(load_prompt(REPLACEMENTS_PROMPT_NAME), self._build_prompt(batch))
+        max_freq = max((w.frequency for w in batch), default=1)
+        suggestions = [
+            s
+            for item in _extract_items(text)
+            if (s := _normalize_item(item, max_freq)) is not None
+        ]
+        if self._verify and suggestions:
+            suggestions = self._verify_suggestions(suggestions)
+        return suggestions
+
+    def _ask(self, system: str, user: str) -> str:
+        """One model call; returns the text of the first text block."""
         response = self._client.messages.create(
             model=self._model,
             max_tokens=8000,
-            system=[
-                {
-                    "type": "text",
-                    "text": load_prompt(REPLACEMENTS_PROMPT_NAME),
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
+            system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             output_config={"effort": self._effort},
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": user}],
         )
-        return self._parse_response(response, batch)
+        return next(
+            (block.text for block in response.content if getattr(block, "type", "") == "text"),
+            "",
+        )
+
+    def _verify_suggestions(
+        self, suggestions: list[ReplacementSuggestion]
+    ) -> list[ReplacementSuggestion]:
+        """Second pass: a critic prompt rejects unsafe/dubious candidates."""
+        listing = "\n".join(f'{i}. "{s.old}" -> "{s.new}"' for i, s in enumerate(suggestions, 1))
+        text = self._ask(load_prompt(VERIFY_PROMPT_NAME), f"Проверь эти правила:\n{listing}")
+        rejected = {
+            (str(v.get("old", "")).lower(), str(v.get("new", "")).lower())
+            for v in _extract_items(text)
+            if str(v.get("verdict", "")).lower() == "reject"
+        }
+        return [s for s in suggestions if (s.old.lower(), s.new.lower()) not in rejected]
 
     def _build_prompt(self, batch: Sequence[ContextWindow]) -> str:
         blocks: list[str] = [load_prompt(USER_INTRO_PROMPT_NAME), ""]
@@ -422,22 +447,6 @@ class AnthropicClient:
             blocks.append(window.render())
             blocks.append("")
         return "\n".join(blocks)
-
-    def _parse_response(
-        self, response: Any, batch: Sequence[ContextWindow]
-    ) -> list[ReplacementSuggestion]:
-        text = next(
-            (block.text for block in response.content if getattr(block, "type", "") == "text"),
-            "",
-        )
-        items = _extract_items(text)
-        max_freq = max((w.frequency for w in batch), default=1)
-        suggestions: list[ReplacementSuggestion] = []
-        for item in items:
-            suggestion = _normalize_item(item, max_freq)
-            if suggestion is not None:
-                suggestions.append(suggestion)
-        return suggestions
 
 
 class NoopClient:
@@ -465,7 +474,9 @@ class ReplacementAnalyzer:
             until=self._config.until,
         )
         self._batcher = WindowBatcher(self._config.batch_size)
-        self._client = client or AnthropicClient(self._config.model, self._config.effort)
+        self._client = client or AnthropicClient(
+            self._config.model, self._config.effort, verify=self._config.verify
+        )
 
     def analyze(self, log_path: Path, existing: dict[str, str] | None = None) -> AnalysisResult:
         windows = self.prepare_windows(log_path)
