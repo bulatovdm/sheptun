@@ -442,6 +442,9 @@ class AnthropicClient:
             base_url=settings.anthropic_base_url,
             api_key=settings.anthropic_api_key,
             default_headers={"User-Agent": user_agent},
+            # Fail fast: no SDK backoff/retries, so proxy errors (502 etc.) surface at once
+            # instead of stalling the run through several retry waits.
+            max_retries=settings.analyzer_max_retries,
         )
 
     def suggest(
