@@ -136,7 +136,7 @@ class Settings:
     analyzer_context_lines: int = int(_get_float("SHEPTUN_ANALYZER_CONTEXT_LINES", 10))
     analyzer_batch_size: int = int(_get_float("SHEPTUN_ANALYZER_BATCH_SIZE", 20))
     analyzer_max_windows: int = int(_get_float("SHEPTUN_ANALYZER_MAX_WINDOWS", 0))  # 0 = no limit
-    analyzer_min_freq: int = int(_get_float("SHEPTUN_ANALYZER_MIN_FREQ", 2))
+    analyzer_min_freq: int = int(_get_float("SHEPTUN_ANALYZER_MIN_FREQ", 1))
     analyzer_effort: str = _get_str("SHEPTUN_ANALYZER_EFFORT", "high")
     # Minimum confidence to keep a suggestion: low | medium | high
     analyzer_min_confidence: str = _get_str("SHEPTUN_ANALYZER_MIN_CONFIDENCE", "medium")
