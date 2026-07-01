@@ -98,7 +98,11 @@ class _FakeClient:
         self._suggestions = suggestions
         self.calls = 0
 
-    def suggest(self, batch: Sequence[ContextWindow]) -> list[ReplacementSuggestion]:  # noqa: ARG002
+    def suggest(
+        self,
+        batch: Sequence[ContextWindow],  # noqa: ARG002
+        known: set[str] | None = None,  # noqa: ARG002
+    ) -> list[ReplacementSuggestion]:
         self.calls += 1
         return self._suggestions
 
@@ -211,7 +215,11 @@ class _FailingClient:
         self._fail_on = fail_on
         self.calls = 0
 
-    def suggest(self, batch: Sequence[ContextWindow]) -> list[ReplacementSuggestion]:  # noqa: ARG002
+    def suggest(
+        self,
+        batch: Sequence[ContextWindow],  # noqa: ARG002
+        known: set[str] | None = None,  # noqa: ARG002
+    ) -> list[ReplacementSuggestion]:
         self.calls += 1
         if self.calls >= self._fail_on:
             raise KeyboardInterrupt("interrupted mid-run")
@@ -398,6 +406,15 @@ class TestVerifyStage:
         batch = [ContextWindow(target="x", before=(), after=(), frequency=5)]
         result = client.suggest(batch)
         assert {s.old for s in result} == {"курсор"}  # no second pass, kept
+
+    def test_known_keys_go_into_prompt(self) -> None:
+        client = self._client(verify=False, ask_replies=["[]"])
+        captured: dict[str, str] = {}
+        client._ask = lambda _system, user: captured.setdefault("user", user) or "[]"  # type: ignore[attr-defined]
+        batch = [ContextWindow(target="строка", before=(), after=(), frequency=5)]
+        client.suggest(batch, known={"комит", "докер"})
+        assert "УЖЕ ПОКРЫТЫЕ ОШИБКИ" in captured["user"]
+        assert "комит" in captured["user"] and "докер" in captured["user"]
 
 
 class TestSuggestionWriter:

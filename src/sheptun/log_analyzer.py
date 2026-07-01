@@ -371,9 +371,15 @@ class WindowBatcher:
 
 
 class SuggestClient(Protocol):
-    """Anything that turns a batch of windows into replacement suggestions."""
+    """Anything that turns a batch of windows into replacement suggestions.
 
-    def suggest(self, batch: Sequence[ContextWindow]) -> list[ReplacementSuggestion]: ...
+    ``known`` are the ``old`` keys already covered (existing rules + earlier
+    accepts this run) — the client tells the model not to re-propose them.
+    """
+
+    def suggest(
+        self, batch: Sequence[ContextWindow], known: set[str] | None = None
+    ) -> list[ReplacementSuggestion]: ...
 
 
 class AnthropicClient:
@@ -401,8 +407,12 @@ class AnthropicClient:
             default_headers={"User-Agent": user_agent},
         )
 
-    def suggest(self, batch: Sequence[ContextWindow]) -> list[ReplacementSuggestion]:
-        text = self._ask(load_prompt(REPLACEMENTS_PROMPT_NAME), self._build_prompt(batch))
+    def suggest(
+        self, batch: Sequence[ContextWindow], known: set[str] | None = None
+    ) -> list[ReplacementSuggestion]:
+        text = self._ask(
+            load_prompt(REPLACEMENTS_PROMPT_NAME), self._build_prompt(batch, known or set())
+        )
         max_freq = max((w.frequency for w in batch), default=1)
         suggestions = [
             s
@@ -440,8 +450,15 @@ class AnthropicClient:
         }
         return [s for s in suggestions if (s.old.lower(), s.new.lower()) not in rejected]
 
-    def _build_prompt(self, batch: Sequence[ContextWindow]) -> str:
+    def _build_prompt(self, batch: Sequence[ContextWindow], known: set[str]) -> str:
         blocks: list[str] = [load_prompt(USER_INTRO_PROMPT_NAME), ""]
+        if known:
+            blocks.append(
+                "УЖЕ ПОКРЫТЫЕ ОШИБКИ (эти слова и их близкие вариации НЕ предлагай — "
+                "они уже исправляются существующими правилами):"
+            )
+            blocks.append(", ".join(sorted(known)))
+            blocks.append("")
         for i, window in enumerate(batch, start=1):
             blocks.append(f"=== Фрагмент {i} (частота: {window.frequency}) ===")
             blocks.append(window.render())
@@ -452,8 +469,10 @@ class AnthropicClient:
 class NoopClient:
     """Client stub for dry runs — never calls the API."""
 
-    def suggest(self, batch: Sequence[ContextWindow]) -> list[ReplacementSuggestion]:
-        del batch  # dry-run stub — never calls the API
+    def suggest(
+        self, batch: Sequence[ContextWindow], known: set[str] | None = None
+    ) -> list[ReplacementSuggestion]:
+        del batch, known  # dry-run stub — never calls the API
         return []
 
 
@@ -512,7 +531,7 @@ class ReplacementAnalyzer:
 
         running_checkpoint = ""
         for index, batch in enumerate(batches, start=1):
-            raw = self._client.suggest(batch)
+            raw = self._client.suggest(batch, known=set(seen))
             fresh = self._accept_new(raw, threshold, seen)
             accepted.extend(fresh)
             processed.extend(batch)

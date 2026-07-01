@@ -134,6 +134,10 @@ LLM pipeline behind `sheptun analyze-replacements` — decomposed by SRP, each s
 
 - **analyze-logs** — Analyzes `logs/sheptun.log` to extract vocabulary for ASR optimization. Generates recommended `SHEPTUN_INITIAL_PROMPT` and word `replacements` for `sheptun.yaml`. Invoke via `@analyze-logs`. (Distinct from the `sheptun analyze-replacements` CLI command / `log_analyzer.py`, which is a standalone Anthropic-SDK pipeline — see Log Analyzer above.)
 
+## Skills
+
+- **review-replacements** (`.claude/skills/review-replacements/`) — reviews new rules in `replacements.yaml` after an analysis pass: flags real-word keys / punctuation / duplicates / dubious translations / language-mix, writes `replacements.check.yaml` + `REPLACEMENTS_REVIEW.md`, asks the user before removing bad rules from the live file, and proposes prompt improvements. Bundles CRITERIA.md, SENSITIVE.md, PROMPT_TUNING.md, scripts/make_check.py. Trigger by asking to review/audit replacement rules or after `sheptun analyze-replacements`.
+
 ## Git Commits
 
 Do not add Co-Authored-By or emoji badges to commit messages.
