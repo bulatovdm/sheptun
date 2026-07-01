@@ -1,6 +1,6 @@
 ---
 name: review-replacements
-description: Reviews word-replacement rules in sheptun's replacements.yaml for correctness after a new analysis pass. Flags real-word keys, punctuation, duplicates, dubious translations and language-mix; produces a check file plus a review report; then asks the user whether to apply the fixes and, on yes, removes the bad rules from replacements.yaml. Also proposes concrete additions to the generation prompt. Use after running `sheptun analyze-replacements` or when the user asks to review/audit replacement rules or improve the analyzer prompt.
+description: Reviews word-replacement rules in sheptun's replacements.yaml for correctness after a new analysis pass. By default reviews only the UNCOMMITTED rules (working copy vs HEAD — what the latest analyze pass just added); pass argument `all` (or `всё`/`все`) to review every analyzer rule. Flags real-word keys, punctuation, duplicates, dubious translations and language-mix; produces a check file plus a review report; then asks the user whether to apply the fixes and, on yes, removes the bad rules from replacements.yaml. Also proposes concrete additions to the generation prompt. Use after running `sheptun analyze-replacements` or when the user asks to review/audit replacement rules or improve the analyzer prompt.
 ---
 
 # Review replacements
@@ -19,16 +19,34 @@ description: Reviews word-replacement rules in sheptun's replacements.yaml for c
 - Когда пользователь просит проверить/провести аудит `replacements.yaml`.
 - Когда просят предложить улучшение промпта анализатора.
 
+**Область по умолчанию — только незакоммиченные правила** (см. Шаг 1). Чтобы отревьюить
+все правила анализатора целиком, запусти с аргументом `all` (или `всё`/`все`).
+
 ## Процесс
 
 ### Шаг 1. Определить, что ревьюить
-Новые правила — те, что снабжены комментарием `# freq=..., conf=...` (их добавляет анализатор).
-Старые (без комментария) обычно уже выверены — по умолчанию не трогай, если пользователь не
-попросил проверить всё.
+
+Область зависит от аргумента скилла:
+
+- **По умолчанию (без аргумента) — только НЕЗАКОММИЧЕННЫЕ правила** (рабочая копия vs HEAD).
+  Это ровно то, что добавил последний проход `analyze-replacements` и что ещё не в git.
+  Уже закоммиченные правила считаются выверенными — не трогай.
+- **Аргумент `all` / `всё` / `все`** — проверяй ВСЕ правила анализатора (с `# freq=`),
+  включая закоммиченные.
 
 ```bash
-grep -nE '# freq=' src/sheptun/config/replacements.yaml | wc -l   # сколько новых правил
+# По умолчанию: незакоммиченные добавленные правила (это и есть область ревью)
+git diff HEAD -- src/sheptun/config/replacements.yaml | grep -E '^\+"' | sed -E 's/^\+//'
+git diff HEAD -- src/sheptun/config/replacements.yaml | grep -cE '^\+"'   # сколько их
+
+# Аргумент all/всё: все правила анализатора
+grep -nE '# freq=' src/sheptun/config/replacements.yaml | wc -l
 ```
+
+Дальше работай по номерам строк из текущего файла: сопоставь ключи `"old"` из diff со
+строками `src/sheptun/config/replacements.yaml` (`grep -nF -f <keys>`), чтобы получить `line`
+для вердиктов. Старые (без `# freq=`) правила не ревьюишь ни в одном режиме, если пользователь
+не попросил явно.
 
 ### Шаг 2. Проверить каждое правило по чек-листу
 Полные критерии и классы ошибок — в [CRITERIA.md](CRITERIA.md). Прочти его перед проверкой.
