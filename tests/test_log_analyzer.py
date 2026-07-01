@@ -404,7 +404,7 @@ class TestVerifyStage:
         verify = '[{"old": "комит", "new": "коммит", "verdict": "keep"}, '
         verify += '{"old": "курсор", "new": "Cursor", "verdict": "reject"}]'
         client = self._client(verify=True, ask_replies=[gen, verify])
-        batch = [ContextWindow(target="x", before=(), after=(), frequency=5)]
+        batch = [ContextWindow(target="комит и курсор", before=(), after=(), frequency=5)]
         result = client.suggest(batch)
         olds = {s.old for s in result}
         assert olds == {"комит"}  # 'курсор' rejected by the critic
@@ -412,7 +412,7 @@ class TestVerifyStage:
     def test_no_verify_keeps_all(self) -> None:
         gen = '[{"old": "курсор", "new": "Cursor", "confidence": "high", "reason": ""}]'
         client = self._client(verify=False, ask_replies=[gen])
-        batch = [ContextWindow(target="x", before=(), after=(), frequency=5)]
+        batch = [ContextWindow(target="открой курсор", before=(), after=(), frequency=5)]
         result = client.suggest(batch)
         assert {s.old for s in result} == {"курсор"}  # no second pass, kept
 
@@ -459,20 +459,38 @@ class TestPhraseIndexGuardsSuggestions:
         c._ask = lambda *_args: gen  # type: ignore[attr-defined,assignment]
         return c
 
-    def test_drops_old_absent_from_log(self) -> None:
-        # 'медлвары' never appears in any Recognized line -> hallucination -> dropped
+    def test_drops_old_not_in_shown_lines(self) -> None:
+        # model invents 'медлвары'; the batch only ever showed 'медлвару' -> dropped
         gen = '[{"old": "медлвары", "new": "middleware", "confidence": "high", "reason": ""}]'
-        index = PhraseIndex(["говорю про медлвару"])  # only 'медлвару', not 'медлвары'
+        index = PhraseIndex(["говорю про медлвару"])
         client = self._client(gen, index)
-        batch = [ContextWindow(target="x", before=(), after=(), frequency=99)]
+        batch = [ContextWindow(target="говорю про медлвару", before=(), after=(), frequency=99)]
         assert client.suggest(batch) == []
+
+    def test_drops_old_in_log_but_not_in_this_batch(self) -> None:
+        # 'комит' exists elsewhere in the log, but this batch never showed it ->
+        # it is not the phrase we're replacing here, so it is dropped
+        gen = '[{"old": "комит", "new": "коммит", "confidence": "high", "reason": ""}]'
+        index = PhraseIndex(["сделай комит"])  # present in the log at large...
+        client = self._client(gen, index)
+        batch = [ContextWindow(target="открой докер", before=(), after=(), frequency=5)]
+        assert client.suggest(batch) == []  # ...but absent from the shown lines
+
+    def test_matches_old_in_context_lines_not_only_target(self) -> None:
+        # 'комит' appears in a before/after context line, not the target -> still valid
+        gen = '[{"old": "комит", "new": "коммит", "confidence": "high", "reason": ""}]'
+        index = PhraseIndex(["сделай комит", "открой докер"])
+        client = self._client(gen, index)
+        batch = [ContextWindow(target="открой докер", before=("сделай комит",), after=())]
+        result = client.suggest(batch)
+        assert {s.old for s in result} == {"комит"}
 
     def test_frequency_is_per_word_not_batch_max(self) -> None:
         gen = '[{"old": "комит", "new": "коммит", "confidence": "high", "reason": ""}]'
         index = PhraseIndex(["сделай комит", "ещё комит"])  # 'комит' in 2 lines
         client = self._client(gen, index)
         # batch frequency is a misleading 454; the real per-word count is 2
-        batch = [ContextWindow(target="x", before=(), after=(), frequency=454)]
+        batch = [ContextWindow(target="сделай комит", before=(), after=(), frequency=454)]
         result = client.suggest(batch)
         assert len(result) == 1
         assert result[0].frequency == 2  # honest count, not the batch max
@@ -480,7 +498,7 @@ class TestPhraseIndexGuardsSuggestions:
     def test_without_index_keeps_batch_frequency(self) -> None:
         gen = '[{"old": "комит", "new": "коммит", "confidence": "high", "reason": ""}]'
         client = self._client(gen, index=None)
-        batch = [ContextWindow(target="x", before=(), after=(), frequency=7)]
+        batch = [ContextWindow(target="сделай комит", before=(), after=(), frequency=7)]
         result = client.suggest(batch)
         assert result[0].frequency == 7  # fallback: no index, batch max stands
 

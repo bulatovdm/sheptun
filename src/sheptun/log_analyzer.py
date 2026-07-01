@@ -127,6 +127,10 @@ class ContextWindow:
             lines.append(f"  {entry}")
         return "\n".join(lines)
 
+    def lines(self) -> tuple[str, ...]:
+        """Every Recognized line shown to the model for this window."""
+        return (*self.before, self.target, *self.after)
+
 
 @dataclass(frozen=True)
 class ReplacementSuggestion:
@@ -446,31 +450,38 @@ class AnthropicClient:
         text = self._ask(
             load_prompt(REPLACEMENTS_PROMPT_NAME), self._build_prompt(batch, known or set())
         )
+        # `old` must occur in the lines actually shown to the model — this is the
+        # phrase we replace, so the model cannot invent a form that was never here.
+        shown = "\n".join(line for window in batch for line in window.lines()).lower()
         # Fallback only when no index is wired: the batch-wide max is a coarse
         # over-estimate, but it keeps stand-alone client usage working.
         batch_freq = max((w.frequency for w in batch), default=1)
         suggestions = [
             s
             for item in _extract_items(text)
-            if (s := self._resolve(_normalize_item(item, batch_freq))) is not None
+            if (s := self._resolve(_normalize_item(item, batch_freq), shown)) is not None
         ]
         if self._verify and suggestions:
             suggestions = self._verify_suggestions(suggestions)
         return suggestions
 
-    def _resolve(self, suggestion: ReplacementSuggestion | None) -> ReplacementSuggestion | None:
-        """Attach the real per-word frequency and drop hallucinated ``old``s.
+    def _resolve(
+        self, suggestion: ReplacementSuggestion | None, shown: str
+    ) -> ReplacementSuggestion | None:
+        """Drop hallucinated ``old``s and attach the real per-word frequency.
 
-        Without an index, pass through unchanged (frequency stays the batch max).
-        With one, an ``old`` absent from every Recognized line is dropped, and a
-        present one carries its true occurrence count.
+        ``shown`` is the lower-cased text of every line handed to the model this
+        batch: an ``old`` absent from it was invented, not observed, and is
+        dropped. Frequency then comes from the whole-log index (true reach); with
+        no index the batch max is kept as a coarse fallback.
         """
-        if suggestion is None or self._phrase_index is None:
-            return suggestion
-        freq = self._phrase_index.frequency(suggestion.old)
-        if freq == 0:
+        if suggestion is None:
             return None
-        return replace(suggestion, frequency=freq)
+        if suggestion.old.lower() not in shown:
+            return None
+        if self._phrase_index is None:
+            return suggestion
+        return replace(suggestion, frequency=self._phrase_index.frequency(suggestion.old))
 
     def set_phrase_index(self, index: PhraseIndex) -> None:
         self._phrase_index = index
