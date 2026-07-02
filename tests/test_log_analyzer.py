@@ -149,15 +149,17 @@ class TestReplacementAnalyzer:
 
 
 class TestTimeRange:
-    def test_since_keeps_only_newer(self, log_path: Path) -> None:
+    def test_since_rewinds_offset_to_date(self, log_path: Path) -> None:
         client = _FakeClient([])
         config = AnalyzerConfig(
             context_lines=1, min_freq=1, batch_size=10, since="2026-07-01 12:00:00"
         )
         analyzer = ReplacementAnalyzer(config, client=client)
         windows = analyzer.prepare_windows(log_path)
-        targets = {w.target for w in windows}
-        assert targets == {"открой докер"}  # only the 2026-07-02 line
+        # since is a positional rewind: the set starts at the first window whose
+        # first-occurrence timestamp is >= the date. Everything before it is skipped.
+        assert all(w.timestamp >= "2026-07-01 12:00:00" for w in windows)
+        assert "открой докер" in {w.target for w in windows}
 
     def test_until_caps_range(self, log_path: Path) -> None:
         client = _FakeClient([])
@@ -170,9 +172,54 @@ class TestTimeRange:
         assert "открой докер" not in targets  # 2026-07-02 excluded
         assert "сделай комит" in targets
 
+    def _dated_log(self, tmp_path: Path, n: int) -> Path:
+        lines = "".join(
+            f"2026-01-{i:02d} 10:00:00,000 [INFO] Recognized: 'фраза {i:02d}'\n"
+            for i in range(1, n + 1)
+        )
+        log = tmp_path / "sheptun.log"
+        log.write_text(lines, encoding="utf-8")
+        return log
+
+    def test_since_position_is_absolute_in_full_set(self, tmp_path: Path) -> None:
+        # 10 windows, one per day. --since 2026-01-06 skips the first 5 (positions 0..4),
+        # so processing 2 of the remaining must report an ABSOLUTE position of 5+2=7 in
+        # the full set — NOT 2 relative to the truncated set. Persisting 2 would make the
+        # next incremental run resume at window 2 (early January), re-doing 5 windows.
+        log = self._dated_log(tmp_path, n=10)
+        config = AnalyzerConfig(
+            context_lines=0,
+            min_freq=1,
+            batch_size=1,
+            max_iterations=2,
+            since="2026-01-06 00:00:00",
+        )
+        analyzer = ReplacementAnalyzer(config, client=_FakeClient([]))
+        windows = analyzer.prepare_windows(log)
+        result = analyzer.analyze_windows(windows, existing={})
+
+        assert result.full_total == 10
+        assert result.processed == 2
+        assert result.position == 7  # 5 skipped by --since + 2 processed
+
+    def test_until_position_stays_absolute(self, tmp_path: Path) -> None:
+        # --until keeps the lower part of the set; processing all of it must reach the
+        # position of the last kept window in the FULL set, not restart the count.
+        log = self._dated_log(tmp_path, n=10)
+        config = AnalyzerConfig(
+            context_lines=0, min_freq=1, batch_size=10, until="2026-01-04 23:59:59"
+        )
+        analyzer = ReplacementAnalyzer(config, client=_FakeClient([]))
+        windows = analyzer.prepare_windows(log)
+        result = analyzer.analyze_windows(windows, existing={})
+
+        assert result.full_total == 10
+        assert result.processed == 4  # фразы 01..04
+        assert result.position == 4  # positions 0..3 done → next is index 4
+
 
 class TestIterationLimitAndCheckpoint:
-    def test_max_iterations_limits_batches_and_orders_by_time(self, log_path: Path) -> None:
+    def test_max_iterations_limits_batches_and_advances_position(self, log_path: Path) -> None:
         client = _FakeClient([])
         config = AnalyzerConfig(context_lines=1, min_freq=1, batch_size=1, max_iterations=1)
         analyzer = ReplacementAnalyzer(config, client=client)
@@ -181,16 +228,16 @@ class TestIterationLimitAndCheckpoint:
         assert result.processed == 1
         assert result.total == len(windows)
         assert client.calls == 1
-        # windows sorted by FIRST-occurrence time; earliest is 'сделай комит'
-        # (first seen 10:31:15) → that is the checkpoint after one batch
-        assert result.checkpoint == "2026-07-01 10:31:15"
+        # one batch of one window processed → position advanced by one
+        assert result.position == 1
+        assert result.full_total == len(windows)
 
-    def test_checkpoint_is_latest_when_all_processed(self, log_path: Path) -> None:
+    def test_position_reaches_full_total_when_all_processed(self, log_path: Path) -> None:
         client = _FakeClient([])
         config = AnalyzerConfig(context_lines=1, min_freq=1, batch_size=10)
         analyzer = ReplacementAnalyzer(config, client=client)
         result = analyzer.analyze(log_path, existing={})
-        assert result.checkpoint == "2026-07-02 09:00:00"
+        assert result.position == result.full_total
 
 
 class TestProgress:
@@ -235,11 +282,10 @@ class _FailingClient:
         del index
 
 
-class TestCheckpointNoSkip:
-    """Regression: with dedup + chronological order + a line-wise checkpoint, a
-    frequent phrase collapses into one window whose timestamp is its LAST
-    occurrence. Advancing the checkpoint past it must not skip earlier lines of
-    other phrases that were never processed."""
+class TestStableOrder:
+    """The window set is ordered by each phrase's FIRST occurrence, so appending
+    new lines to the log never shifts the already-processed prefix — the positional
+    checkpoint stays valid across runs."""
 
     def _write(self, tmp_path: Path, lines: list[str]) -> Path:
         p = tmp_path / "sheptun.log"
@@ -247,10 +293,9 @@ class TestCheckpointNoSkip:
         return p
 
     def test_window_timestamp_is_first_occurrence(self, tmp_path: Path) -> None:
-        # A frequent phrase occurs at 10:00 and again at 20:00. For a line-wise
-        # checkpoint to be safe, the window must be ordered/checkpointed by its
-        # FIRST occurrence (10:00), not its last (20:00) — otherwise processing it
-        # advances the checkpoint past lines that were never analysed.
+        # A frequent phrase occurs at 10:00 and again at 20:00. Ordering by the
+        # FIRST occurrence (10:00) keeps the phrase's position stable even when the
+        # later occurrence is appended after an earlier run.
         log = self._write(
             tmp_path,
             [
@@ -264,45 +309,44 @@ class TestCheckpointNoSkip:
         w = next(x for x in windows if x.target == "частая фраза")
         assert w.timestamp == "2026-01-01 10:00:00", (
             f"window timestamp {w.timestamp} is the last occurrence, not the first — "
-            "a line-wise checkpoint would skip lines between the two occurrences"
+            "ordering by it would shift the phrase's position when lines are appended"
         )
 
 
 class TestCheckpointOnInterrupt:
-    """A long run interrupted mid-way must still advance the checkpoint for the
+    """A long run interrupted mid-way must still advance the position for the
     batches already processed, so the next run resumes instead of restarting."""
 
-    def test_progress_exposes_running_checkpoint(self, log_path: Path) -> None:
+    def test_progress_exposes_running_position(self, log_path: Path) -> None:
         client = _FakeClient([])
-        # chronological order (max_iterations>0) so processed prefix is contiguous
         config = AnalyzerConfig(context_lines=1, min_freq=1, batch_size=1, max_iterations=10)
         analyzer = ReplacementAnalyzer(config, client=client)
         windows = analyzer.prepare_windows(log_path)
 
-        checkpoints: list[str] = []
+        positions: list[int] = []
         analyzer.analyze_windows(
-            windows, existing={}, on_progress=lambda p: checkpoints.append(p.checkpoint)
+            windows, existing={}, on_progress=lambda p: positions.append(p.position)
         )
-        # checkpoint must grow monotonically and match the last window's time
-        assert checkpoints == sorted(checkpoints)
-        assert checkpoints[-1] == max(w.timestamp for w in windows)
+        # position grows by one per single-window batch and reaches the full total
+        assert positions == list(range(1, len(windows) + 1))
+        assert positions[-1] == analyzer.full_total
 
-    def test_checkpoint_saved_before_interrupt(self, log_path: Path) -> None:
+    def test_position_saved_before_interrupt(self, log_path: Path) -> None:
         client = _FailingClient(fail_on=2)  # 1 batch ok, 2nd raises
         config = AnalyzerConfig(context_lines=1, min_freq=1, batch_size=1, max_iterations=10)
         analyzer = ReplacementAnalyzer(config, client=client)
         windows = analyzer.prepare_windows(log_path)
 
-        saved: list[str] = []
+        saved: list[int] = []
 
         def on_progress(p: BatchProgress) -> None:
-            saved.append(p.checkpoint)  # caller persists after each batch
+            saved.append(p.position)  # caller persists after each batch
 
         with pytest.raises(KeyboardInterrupt):
             analyzer.analyze_windows(windows, existing={}, on_progress=on_progress)
 
-        # the first batch's checkpoint was delivered before the crash → not lost
-        assert saved == [windows[0].timestamp]
+        # the first batch's position was delivered before the crash → not lost
+        assert saved == [1]
 
 
 class _NetFailingClient:
@@ -329,13 +373,13 @@ class _NetFailingClient:
 
 class TestCheckpointOnRequestError:
     """Regression: a proxy 502 mid-run must NOT crash the analyzer with a traceback.
-    It stops early, returns a partial AnalysisResult, and keeps the checkpoint of the
-    batches that completed — so the next run resumes instead of restarting from zero.
-    This was the bug where a --since run failed and the next run began at the start."""
+    It stops early, returns a partial AnalysisResult, and keeps the position of the
+    batches that completed — so the next run resumes instead of restarting from zero."""
 
-    def _windows(self, tmp_path: Path, n: int) -> tuple[ReplacementAnalyzer, list[ContextWindow]]:
+    def _windows(self, tmp_path: Path, n: int) -> tuple[AnalyzerConfig, Path]:
         lines = "".join(
-            f"2026-01-{i:02d} 10:00:00,000 [INFO] Recognized: 'фраза {i}'\n" for i in range(1, n + 1)
+            f"2026-01-{i:02d} 10:00:00,000 [INFO] Recognized: 'фраза {i}'\n"
+            for i in range(1, n + 1)
         )
         log = tmp_path / "sheptun.log"
         log.write_text(lines, encoding="utf-8")
@@ -362,8 +406,8 @@ class TestCheckpointOnRequestError:
 
         assert result.interrupted is True
         assert result.processed == 2  # batches 1 and 2 completed before the 502
-        # checkpoint is the last completed batch's time — the resume point
-        assert result.checkpoint == windows[1].timestamp
+        # position is the count of completed windows — the resume point
+        assert result.position == 2
 
     def test_error_on_first_batch_yields_empty_but_no_crash(self, tmp_path: Path) -> None:
         config, log = self._windows(tmp_path, n=3)
@@ -374,7 +418,7 @@ class TestCheckpointOnRequestError:
 
         assert result.interrupted is True
         assert result.processed == 0
-        assert result.checkpoint == ""  # nothing completed → nothing to resume from
+        assert result.position == 0  # nothing completed → resume from the start offset
 
     def test_clean_run_is_not_marked_interrupted(self, tmp_path: Path) -> None:
         config, log = self._windows(tmp_path, n=3)
@@ -385,7 +429,7 @@ class TestCheckpointOnRequestError:
 
         assert result.interrupted is False
         assert result.processed == 3
-        assert result.checkpoint == windows[-1].timestamp
+        assert result.position == result.full_total
 
 
 class _FlakyClient:
@@ -493,20 +537,32 @@ class TestIncrementalWriter:
 class TestAnalyzerState:
     def test_roundtrip(self, tmp_path: Path) -> None:
         state = AnalyzerState(tmp_path / "state.json")
-        assert state.last_timestamp() is None
-        state.save("2026-07-01 10:00:00")
-        assert state.last_timestamp() == "2026-07-01 10:00:00"
+        assert state.position() == 0
+        state.save(42)
+        assert state.position() == 42
+
+    def test_save_can_rewind(self, tmp_path: Path) -> None:
+        # --since/--full rewind the checkpoint, so save must accept a smaller value.
+        state = AnalyzerState(tmp_path / "state.json")
+        state.save(500)
+        state.save(0)
+        assert state.position() == 0
+
+    def test_pre_position_file_reads_as_zero(self, tmp_path: Path) -> None:
+        path = tmp_path / "state.json"
+        path.write_text('{"last_timestamp": "2026-04-08 16:24:53"}', encoding="utf-8")
+        assert AnalyzerState(path).position() == 0
 
     def test_reset(self, tmp_path: Path) -> None:
         state = AnalyzerState(tmp_path / "state.json")
-        state.save("2026-07-01 10:00:00")
+        state.save(10)
         state.reset()
-        assert state.last_timestamp() is None
+        assert state.position() == 0
 
     def test_ignores_corrupt_file(self, tmp_path: Path) -> None:
         path = tmp_path / "state.json"
         path.write_text("{ not json", encoding="utf-8")
-        assert AnalyzerState(path).last_timestamp() is None
+        assert AnalyzerState(path).position() == 0
 
 
 class TestDateNormalization:

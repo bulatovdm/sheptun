@@ -149,17 +149,19 @@ class ReplacementSuggestion:
 class AnalysisResult:
     """Outcome of one run: suggestions plus the windows actually processed.
 
-    ``checkpoint`` is the newest timestamp among processed windows — the value to
-    persist so the next run resumes after it.
+    ``position`` is the absolute index reached in the full window set — the value
+    to persist so the next run resumes there. ``full_total`` is the size of that
+    full set, a stable denominator that does not shift between runs.
     """
 
     suggestions: list[ReplacementSuggestion]
     processed: int
     total: int
-    checkpoint: str
+    position: int
+    full_total: int
     # True when a batch raised (e.g. proxy 502) and the run stopped early. The
     # result still holds the progress from the batches that DID complete, so the
-    # caller persists the checkpoint instead of losing everything to a traceback.
+    # caller persists the position instead of losing everything to a traceback.
     interrupted: bool = False
 
 
@@ -167,8 +169,8 @@ class AnalysisResult:
 class BatchProgress:
     """Progress after one batch (model request) completes.
 
-    ``checkpoint`` is the newest timestamp among windows processed so far — the
-    caller can persist it after each batch so an interrupted run still resumes.
+    ``position`` is the absolute index reached in the full window set — the caller
+    can persist it after each batch so an interrupted run still resumes.
     """
 
     batch_index: int
@@ -176,7 +178,8 @@ class BatchProgress:
     windows_done: int
     suggestions_so_far: int
     new_suggestions: list[ReplacementSuggestion]
-    checkpoint: str
+    position: int
+    full_total: int
 
 
 ProgressCallback = Callable[[BatchProgress], None]
@@ -219,11 +222,10 @@ class AnalyzerConfig:
     delay: float = field(default_factory=lambda: settings.analyzer_delay)
     retry_backoff: float = field(default_factory=lambda: settings.analyzer_retry_backoff)
     max_error_retries: int = field(default_factory=lambda: settings.analyzer_max_error_retries)
-    since: str | None = None  # only target lines with timestamp > since
-    until: str | None = None  # only target lines with timestamp <= until
-    # Process windows oldest-first so the checkpoint advances contiguously and
-    # survives interruption. Auto-forced when max_iterations > 0.
-    chronological: bool = False
+    since: str | None = None  # explicit range only: keep lines with timestamp > since
+    until: str | None = None  # explicit range only: keep lines with timestamp <= until
+    # Incremental resume: skip this many windows of the full, stably-ordered set.
+    start_offset: int = 0
 
 
 def _extract_items(text: str) -> list[dict[str, Any]]:
@@ -332,23 +334,14 @@ class LogParser:
 class ContextWindowBuilder:
     """Builds +/-N context windows around each Recognized line, deduped by frequency.
 
-    ``since``/``until`` (inclusive/inclusive) bound which target lines are kept by
-    their timestamp; context lines are always taken from the full log, so a window
-    near the boundary still has its surrounding lines. Frequency counts every
-    occurrence of a phrase across the whole log, not only the ones in range.
+    The full, stably-ordered set is always returned; date bounds are applied later
+    as positional slices, so the checkpoint (an index into this set) stays
+    comparable across runs. Frequency counts every occurrence of a phrase.
     """
 
-    def __init__(
-        self,
-        context_lines: int,
-        min_freq: int,
-        since: str | None = None,
-        until: str | None = None,
-    ) -> None:
+    def __init__(self, context_lines: int, min_freq: int) -> None:
         self._context_lines = context_lines
         self._min_freq = min_freq
-        self._since = since
-        self._until = until
 
     def build(self, entries: Sequence[LogEntry]) -> list[ContextWindow]:
         raw_windows = self._build_raw(entries)
@@ -371,17 +364,11 @@ class ContextWindowBuilder:
         start = max(start, 0)
         return tuple(entries[i].text for i in range(start, min(end, len(entries))))
 
-    def _in_range(self, timestamp: str) -> bool:
-        if self._since is not None and timestamp <= self._since:
-            return False
-        return not (self._until is not None and timestamp > self._until)
-
     def _dedup(self, windows: Sequence[ContextWindow]) -> list[ContextWindow]:
         counts: dict[str, int] = {}
         first_seen: dict[str, ContextWindow] = {}
-        in_range: dict[str, bool] = {}
-        # FIRST occurrence timestamp — the window is ordered/checkpointed by it, so a
-        # line-wise checkpoint never jumps past unprocessed lines of a frequent phrase.
+        # FIRST occurrence timestamp — the window is ordered by it, so appending new
+        # lines to the log never shifts the already-processed prefix (stable index).
         first_ts: dict[str, str] = {}
         for window in windows:
             key = window.target.lower()
@@ -392,15 +379,11 @@ class ContextWindowBuilder:
                 first_ts[key] = (
                     window.timestamp if current is None else min(current, window.timestamp)
                 )
-            # since/until: keep the phrase if ANY occurrence falls in range (independent
-            # of the window's own timestamp above).
-            if self._in_range(window.timestamp):
-                in_range[key] = True
 
         result: list[ContextWindow] = []
         for key, window in first_seen.items():
             freq = counts[key]
-            if freq < self._min_freq or not in_range.get(key):
+            if freq < self._min_freq:
                 continue
             result.append(
                 ContextWindow(
@@ -411,7 +394,7 @@ class ContextWindowBuilder:
                     timestamp=first_ts.get(key, window.timestamp),
                 )
             )
-        result.sort(key=lambda w: w.frequency, reverse=True)
+        result.sort(key=lambda w: (w.timestamp, w.target))
         return result
 
 
@@ -590,13 +573,30 @@ class ReplacementAnalyzer:
         self._window_builder = ContextWindowBuilder(
             self._config.context_lines,
             self._config.min_freq,
-            since=self._config.since,
-            until=self._config.until,
         )
         self._batcher = WindowBatcher(self._config.batch_size)
         self._client = client or AnthropicClient(
             self._config.model, self._config.effort, verify=self._config.verify
         )
+        self._full_total = 0
+        self._applied_offset = 0
+
+    @property
+    def full_total(self) -> int:
+        """Size of the full window set before offset/max-windows slicing.
+
+        Set by ``prepare_windows``; the stable denominator for absolute progress.
+        """
+        return self._full_total
+
+    @property
+    def applied_offset(self) -> int:
+        """Index in the full set where the prepared windows begin.
+
+        A --since date resolves to a positional offset here, so progress and the
+        saved position stay absolute in the full set — not relative to the slice.
+        """
+        return self._applied_offset
 
     def analyze(self, log_path: Path, existing: dict[str, str] | None = None) -> AnalysisResult:
         windows = self.prepare_windows(log_path)
@@ -608,14 +608,30 @@ class ReplacementAnalyzer:
         # reject a hallucinated ``old`` and stamp the true count on the rest.
         self._client.set_phrase_index(PhraseIndex(e.text for e in entries))
         windows = self._window_builder.build(entries)
-        # Chronological order lets the checkpoint advance contiguously (and survive
-        # interruption). An iteration cap forces it too, since it processes a prefix.
-        # Otherwise rank by frequency (most impactful first).
-        if self._config.chronological or self._config.max_iterations > 0:
-            windows.sort(key=lambda w: w.timestamp)
+        # The set is sorted by timestamp, so since/until are contiguous slices of it.
+        # Slicing (not value-filtering) keeps every window's index equal to its
+        # position in the full set, so the saved position stays absolute.
+        self._full_total = len(windows)
+        self._applied_offset = self._resolve_offset(windows)
+        upper = self._resolve_upper(windows)
+        windows = windows[self._applied_offset : upper]
         if self._config.max_windows > 0:
             windows = windows[: self._config.max_windows]
         return windows
+
+    def _resolve_offset(self, windows: Sequence[ContextWindow]) -> int:
+        """Where to start: a --since date wins (rewind to it), else the config offset."""
+        since = self._config.since
+        if since is None:
+            return self._config.start_offset
+        return next((i for i, w in enumerate(windows) if w.timestamp >= since), len(windows))
+
+    def _resolve_upper(self, windows: Sequence[ContextWindow]) -> int:
+        """Exclusive upper index for --until, or the full length when unset."""
+        until = self._config.until
+        if until is None:
+            return len(windows)
+        return next((i for i, w in enumerate(windows) if w.timestamp > until), len(windows))
 
     def analyze_windows(
         self,
@@ -634,7 +650,7 @@ class ReplacementAnalyzer:
         accepted: list[ReplacementSuggestion] = []
         processed: list[ContextWindow] = []
 
-        running_checkpoint = ""
+        start_offset = self._applied_offset
         interrupted = False
         for index, batch in enumerate(batches, start=1):
             # Pause between requests (not before the first) to ease load on the
@@ -645,16 +661,13 @@ class ReplacementAnalyzer:
                 raw = self._suggest_with_retry(batch, seen, index, len(batches), on_retry)
             except Exception:
                 # Batch still failing after all retries. Stop, but return what the
-                # earlier batches produced so the caller can persist the checkpoint —
+                # earlier batches produced so the caller can persist the position —
                 # otherwise the whole run's progress is lost to a traceback.
                 interrupted = True
                 break
             fresh = self._accept_new(raw, threshold, seen)
             accepted.extend(fresh)
             processed.extend(batch)
-            running_checkpoint = max(
-                running_checkpoint, max((w.timestamp for w in batch), default="")
-            )
             if on_progress is not None:
                 on_progress(
                     BatchProgress(
@@ -663,7 +676,8 @@ class ReplacementAnalyzer:
                         windows_done=len(processed),
                         suggestions_so_far=len(accepted),
                         new_suggestions=fresh,
-                        checkpoint=running_checkpoint,
+                        position=start_offset + len(processed),
+                        full_total=self._full_total,
                     )
                 )
 
@@ -671,7 +685,8 @@ class ReplacementAnalyzer:
             suggestions=accepted,
             processed=len(processed),
             total=len(windows),
-            checkpoint=running_checkpoint,
+            position=start_offset + len(processed),
+            full_total=self._full_total,
             interrupted=interrupted,
         )
 
@@ -823,7 +838,12 @@ class SuggestionWriter:
 
 
 class AnalyzerState:
-    """Persists the analysis checkpoint (last processed timestamp) as JSON."""
+    """Persists the last processed position in the full window set as JSON.
+
+    A pre-position state file (with only ``last_timestamp``) reads as position 0:
+    the timestamp is not convertible to an index, so the next run re-scans from the
+    start — harmless, since dedup against existing rules prevents duplicates.
+    """
 
     def __init__(self, path: Path | None = None) -> None:
         self._path = path or (settings.dataset_path / "analyzer_state.json")
@@ -832,21 +852,19 @@ class AnalyzerState:
     def path(self) -> Path:
         return self._path
 
-    def last_timestamp(self) -> str | None:
+    def position(self) -> int:
         if not self._path.exists():
-            return None
+            return 0
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
-            return None
-        value = data.get("last_timestamp")
-        return str(value) if value else None
+            return 0
+        value = data.get("position")
+        return int(value) if isinstance(value, int) else 0
 
-    def save(self, last_timestamp: str, runs: int | None = None) -> None:
-        if not last_timestamp:
-            return
+    def save(self, position: int, runs: int | None = None) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"last_timestamp": last_timestamp, "runs": (runs or 0) + 1}
+        payload = {"position": position, "runs": (runs or 0) + 1}
         self._path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )

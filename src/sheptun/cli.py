@@ -289,7 +289,8 @@ def analyze_replacements(
     since: Annotated[
         str | None,
         typer.Option(
-            "--since", help="Анализировать с даты (YYYY-MM-DD[ HH:MM:SS]); игнорирует чекпоинт"
+            "--since",
+            help="Перемотать позицию на дату (YYYY-MM-DD[ HH:MM:SS]) и продолжать с неё",
         ),
     ] = None,
     until: Annotated[
@@ -298,7 +299,7 @@ def analyze_replacements(
     ] = None,
     full: Annotated[
         bool,
-        typer.Option("--full", help="Весь лог, игнорируя чекпоинт последней сессии"),
+        typer.Option("--full", help="Перемотать позицию в начало и пройти весь лог"),
     ] = False,
     reset_state: Annotated[
         bool,
@@ -326,9 +327,11 @@ def analyze_replacements(
 ) -> None:
     """Анализировать лог через Anthropic Agent SDK и предложить автозамены.
 
-    По умолчанию инкрементально: обрабатывает только строки, появившиеся после
-    прошлого запуска (чекпоинт в dataset/analyzer_state.json). Флаги --since /
-    --until задают явный диапазон, --full игнорирует чекпоинт.
+    Продолжает с сохранённой позиции в полном наборе окон
+    (dataset/analyzer_state.json), поэтому прерванный ^C прогон возобновляется с
+    того же места. Позиция сохраняется после каждого батча. --since перематывает
+    её на дату, --full — в начало, --until ограничивает верх, --reset-state
+    сбрасывает.
     """
     from sheptun.commands import CommandConfigLoader
     from sheptun.log_analyzer import (
@@ -358,21 +361,18 @@ def analyze_replacements(
     analyzer_log = _setup_analyzer_logging(resolved_log)
 
     try:
-        resolved_since = (
-            normalize_since(since) if since else (None if full else state.last_timestamp())
-        )
+        resolved_since = normalize_since(since) if since else None
         resolved_until = normalize_until(until) if until else None
     except ValueError as exc:
         _error(str(exc))
         raise typer.Exit(1) from exc
 
-    # Чекпоинт можно двигать (и переживать прерывание/сбой) на любом непрерывном
-    # хронологическом ПРЕФИКСЕ лога снизу: инкрементальный режим и --since оба такие
-    # (--since лишь поднимает нижнюю границу). --until оставляет открытый верх, поэтому
-    # префикс уже не «до конца» — там чекпоинт не сохраняем, чтобы не перепрыгнуть хвост.
-    chronological = until is None and not full
+    # Позиция (индекс в полном наборе окон) сохраняется ВСЕГДА. Стартовая точка:
+    # --since перематывает на дату, --full — в начало, иначе продолжаем с сохранённой.
+    # --since/--until отдаются в конфиг датами и переводятся в позиционные срезы там.
+    start_offset = 0 if (since or full) else state.position()
     analyzer_config = AnalyzerConfig(
-        since=resolved_since, until=resolved_until, chronological=chronological
+        since=resolved_since, until=resolved_until, start_offset=start_offset
     )
     if context is not None:
         analyzer_config.context_lines = context
@@ -398,12 +398,18 @@ def analyze_replacements(
         analyzer_config.model = model
 
     _info(f"Анализ лога: {resolved_log}")
-    _hint(f"Диапазон: since={resolved_since or '(начало)'}, until={resolved_until or '(конец)'}")
+    range_hint = (f", since={resolved_since}" if resolved_since else "") + (
+        f", until={resolved_until}" if resolved_until else ""
+    )
 
     if dry_run:
         analyzer = ReplacementAnalyzer(analyzer_config, client=NoopClient())
         windows = analyzer.prepare_windows(resolved_log)
-        _info(f"Окон к анализу: {len(windows)} (контекст ±{analyzer_config.context_lines})")
+        _info(
+            f"Окон к анализу: {len(windows)} из {analyzer.full_total} "
+            f"(с позиции {analyzer.applied_offset}{range_hint}, "
+            f"контекст ±{analyzer_config.context_lines})"
+        )
         return
 
     # Датированное имя отчёта за прогон — файлы не перезаписываются, история копится.
@@ -420,29 +426,25 @@ def analyze_replacements(
         _info("Новых строк для анализа нет.")
         return
     _info(
-        f"Окон к анализу: {len(windows)}, модель: {analyzer_config.model}, "
-        f"батч: {analyzer_config.batch_size}"
+        f"Окон к анализу: {len(windows)} из {analyzer.full_total} "
+        f"(с позиции {analyzer.applied_offset}{range_hint}), "
+        f"модель: {analyzer_config.model}, батч: {analyzer_config.batch_size}"
     )
 
     writer = SuggestionWriter()
 
-    # Чекпоинт сохраняем по ходу только когда окна идут по времени и весь набор в
-    # обработке (без --max-windows) — иначе префикс не непрерывен по времени.
-    save_checkpoint = chronological and analyzer_config.max_windows == 0
-
     def on_progress(progress: BatchProgress) -> None:
         # После каждого батча: дописываем найденное в отчёт и (при --apply) в конфиг,
-        # плюс продвигаем чекпоинт, чтобы прерванный прогон продолжился, не начиная заново.
+        # плюс продвигаем позицию, чтобы прерванный прогон продолжился, не начиная заново.
         writer.append_report(progress.new_suggestions, output)
         if apply and progress.new_suggestions:
             writer.apply(progress.new_suggestions, replacements_path)
-        if save_checkpoint and progress.checkpoint:
-            state.save(progress.checkpoint, runs=None)
+        state.save(progress.position, runs=None)
         for s in progress.new_suggestions:
             _hint(f'  + "{s.old}" → "{s.new}" ({s.confidence})')
         _info(
             f"Батч {progress.batch_index}/{progress.batch_total} · "
-            f"окон {progress.windows_done}/{len(windows)} · "
+            f"окно {progress.position}/{progress.full_total} · "
             f"кандидатов {progress.suggestions_so_far}"
         )
 
@@ -458,21 +460,20 @@ def analyze_replacements(
                 f"{ev.attempt}/{ev.max_attempts}), жду {ev.wait:.0f}с: {brief}"
             )
 
-    result = analyzer.analyze_windows(
-        windows, existing, on_progress=on_progress, on_retry=on_retry
-    )
+    result = analyzer.analyze_windows(windows, existing, on_progress=on_progress, on_retry=on_retry)
 
-    # Прогон мог прерваться на батче (502 прокси и т.п.). Чекпоинт уже сохранён по ходу
+    # Прогон мог прерваться на батче (502 прокси и т.п.). Позиция уже сохранена по ходу
     # в on_progress, но фиксируем финальное значение ещё раз — на случай гонок/частичного
     # прохода — и сообщаем понятно, откуда продолжать, вместо трейсбека.
-    if save_checkpoint and result.checkpoint:
-        state.save(result.checkpoint, runs=None)
+    state.save(result.position, runs=None)
 
     if result.interrupted:
         _error("Прогон прерван ошибкой запроса (напр. 502 прокси). Обработано не всё.")
         _hint(f"Детали ошибки — в {analyzer_log}")
-        if save_checkpoint and result.checkpoint:
-            _success(f"Прогресс сохранён. Продолжить: --since «{result.checkpoint}»")
+        _success(
+            f"Прогресс сохранён (позиция {result.position}/{result.full_total}). "
+            "Продолжить: запустите снова."
+        )
 
     if result.processed < result.total and not result.interrupted:
         _hint(f"Обработано окон: {result.processed}/{result.total} (лимит итераций)")
@@ -483,10 +484,8 @@ def analyze_replacements(
     elif not result.interrupted:
         _info("Готово. Новых кандидатов нет (отчёт не создавался).")
 
-    if save_checkpoint and result.checkpoint and not result.interrupted:
-        _hint(f"Чекпоинт: {result.checkpoint} → {state.path}")
-    elif not save_checkpoint and chronological:
-        _hint("Чекпоинт не обновлён (частичный прогон с --max-windows).")
+    if not result.interrupted:
+        _hint(f"Позиция: {result.position}/{result.full_total} → {state.path}")
 
 
 @app.command()
