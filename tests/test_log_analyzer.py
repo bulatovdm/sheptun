@@ -113,6 +113,25 @@ class _FakeClient:
         self.index = index
 
 
+class _KnownCapturingClient:
+    """Fake client that records the union of every `known` set it received."""
+
+    def __init__(self, suggestions: list[ReplacementSuggestion]) -> None:
+        self._suggestions = suggestions
+        self.seen_known: set[str] = set()
+
+    def suggest(
+        self,
+        batch: Sequence[ContextWindow],  # noqa: ARG002
+        known: set[str] | None = None,
+    ) -> list[ReplacementSuggestion]:
+        self.seen_known |= known or set()
+        return self._suggestions
+
+    def set_phrase_index(self, index: PhraseIndex) -> None:
+        del index
+
+
 class TestReplacementAnalyzer:
     def test_dedups_against_existing(self, log_path: Path) -> None:
         client = _FakeClient(
@@ -126,6 +145,29 @@ class TestReplacementAnalyzer:
         result = analyzer.analyze(log_path, existing={"комит": "коммит"})
         olds = {s.old for s in result.suggestions}
         assert olds == {"пайтон"}  # existing rule filtered out
+
+    def test_send_known_off_keeps_prompt_clean_but_still_dedups(self, log_path: Path) -> None:
+        # Off by default: the model is never told about existing rules (lean prompt),
+        # yet the existing `old` is still filtered out before the result — dedup lives
+        # in _accept_new, not in the prompt.
+        client = _KnownCapturingClient(
+            [
+                ReplacementSuggestion("комит", "коммит", "high", "", 2),
+                ReplacementSuggestion("пайтон", "Python", "high", "", 1),
+            ]
+        )
+        config = AnalyzerConfig(context_lines=2, min_freq=1, batch_size=10, send_known=False)
+        analyzer = ReplacementAnalyzer(config, client=client)
+        result = analyzer.analyze(log_path, existing={"комит": "коммит"})
+        assert client.seen_known == set()  # nothing about existing rules reached the model
+        assert {s.old for s in result.suggestions} == {"пайтон"}  # existing rule still dropped
+
+    def test_send_known_on_passes_existing_to_model(self, log_path: Path) -> None:
+        client = _KnownCapturingClient([])
+        config = AnalyzerConfig(context_lines=2, min_freq=1, batch_size=10, send_known=True)
+        analyzer = ReplacementAnalyzer(config, client=client)
+        analyzer.analyze(log_path, existing={"комит": "коммит"})
+        assert "комит" in client.seen_known  # opt-in restores the old behaviour
 
     def test_filters_below_min_confidence(self, log_path: Path) -> None:
         client = _FakeClient(

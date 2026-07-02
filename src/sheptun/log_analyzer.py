@@ -228,6 +228,7 @@ class AnalyzerConfig:
     max_iterations: int = field(default_factory=lambda: settings.analyzer_max_iterations)
     verify: bool = field(default_factory=lambda: settings.analyzer_verify)
     stream: bool = field(default_factory=lambda: settings.analyzer_stream)
+    send_known: bool = field(default_factory=lambda: settings.analyzer_send_known)
     delay: float = field(default_factory=lambda: settings.analyzer_delay)
     retry_backoff: float = field(default_factory=lambda: settings.analyzer_retry_backoff)
     max_error_retries: int = field(default_factory=lambda: settings.analyzer_max_error_retries)
@@ -770,10 +771,14 @@ class ReplacementAnalyzer:
         caller stops the run (keeping earlier progress). A success resets the counter.
         ``KeyboardInterrupt`` is never retried.
         """
+        # `seen` still drives dedup in `_accept_new`; we only choose whether to also spend
+        # tokens telling the model about it. With a large rule set that block dominates the
+        # request, so it's off by default and dedup happens purely on our side before writing.
+        known = set(seen) if self._config.send_known else set()
         attempt = 0
         while True:
             try:
-                return self._client.suggest(batch, known=set(seen))
+                return self._client.suggest(batch, known=known)
             except Exception as exc:
                 attempt += 1
                 if attempt > self._config.max_error_retries:

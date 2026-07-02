@@ -146,7 +146,11 @@ class Settings:
     analyzer_verify: bool = _get_bool("SHEPTUN_ANALYZER_VERIFY", True)
     # Stream model responses (SSE) so a long generation keeps the connection alive and
     # doesn't hit a proxy read-timeout (Cloudflare 524). Same result, different transport.
-    analyzer_stream: bool = _get_bool("SHEPTUN_ANALYZER_STREAM", False)
+    analyzer_stream: bool = _get_bool("SHEPTUN_ANALYZER_STREAM", True)
+    # Send the list of already-covered `old` keys into every prompt so the model skips them.
+    # Off by default: with 1000+ rules that block is ~4-5k tokens per request; dedup against
+    # existing rules still runs before writing, so dropping it costs no correctness, only tokens.
+    analyzer_send_known: bool = _get_bool("SHEPTUN_ANALYZER_SEND_KNOWN", False)
     # SDK-level retries per request — 0 = fail fast; our own backoff loop handles retries instead.
     analyzer_max_retries: int = int(_get_float("SHEPTUN_ANALYZER_MAX_RETRIES", 0))
     # Pause (seconds) between successful model requests — eases load on the proxy/origin (502s).

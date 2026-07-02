@@ -277,7 +277,14 @@ def analyze_replacements(
         bool | None,
         typer.Option(
             "--stream/--no-stream",
-            help="Стримить ответы модели (SSE) — лечит таймаут прокси 524 на долгих запросах",
+            help="Стримить ответы модели (SSE) — лечит таймаут прокси 524 на долгих запросах (по умолчанию вкл.)",
+        ),
+    ] = None,
+    send_known: Annotated[
+        bool | None,
+        typer.Option(
+            "--send-known/--no-send-known",
+            help="Слать список уже покрытых правил в промпт (тяжелее запрос; дедуп и так на записи)",
         ),
     ] = None,
     delay: Annotated[
@@ -398,6 +405,8 @@ def analyze_replacements(
         analyzer_config.verify = verify
     if stream is not None:
         analyzer_config.stream = stream
+    if send_known is not None:
+        analyzer_config.send_known = send_known
     if delay is not None:
         analyzer_config.delay = delay
     if retry_backoff is not None:
