@@ -408,5 +408,3 @@ class TestLoadTranscripts:
         records = load_transcripts(jsonl)
 
         assert len(records) == 1
-
-

@@ -32,8 +32,12 @@ def draw_arrow_up(draw: ImageDraw.ImageDraw, cx: int, cy: int, size: int) -> Non
     )
     # Round caps at ends
     r = stroke // 2
-    draw.ellipse([cx - half_w - r, head_y + half_w - r, cx - half_w + r, head_y + half_w + r], fill="black")
-    draw.ellipse([cx + half_w - r, head_y + half_w - r, cx + half_w + r, head_y + half_w + r], fill="black")
+    draw.ellipse(
+        [cx - half_w - r, head_y + half_w - r, cx - half_w + r, head_y + half_w + r], fill="black"
+    )
+    draw.ellipse(
+        [cx + half_w - r, head_y + half_w - r, cx + half_w + r, head_y + half_w + r], fill="black"
+    )
     draw.ellipse([cx - r, head_y - r, cx + r, head_y + r], fill="black")
 
     # Shaft (vertical line with round caps)
@@ -69,8 +73,12 @@ def draw_arrow_down(draw: ImageDraw.ImageDraw, cx: int, cy: int, size: int) -> N
     )
     # Round caps at ends
     r = stroke // 2
-    draw.ellipse([cx - half_w - r, head_y - half_w - r, cx - half_w + r, head_y - half_w + r], fill="black")
-    draw.ellipse([cx + half_w - r, head_y - half_w - r, cx + half_w + r, head_y - half_w + r], fill="black")
+    draw.ellipse(
+        [cx - half_w - r, head_y - half_w - r, cx - half_w + r, head_y - half_w + r], fill="black"
+    )
+    draw.ellipse(
+        [cx + half_w - r, head_y - half_w - r, cx + half_w + r, head_y - half_w + r], fill="black"
+    )
     draw.ellipse([cx - r, head_y - r, cx + r, head_y + r], fill="black")
 
     # Shaft (vertical line with round caps)
@@ -85,7 +93,9 @@ def draw_arrow_down(draw: ImageDraw.ImageDraw, cx: int, cy: int, size: int) -> N
 
 
 def generate_icon(
-    base_name: str, output_name: str, arrow_fn: Any,
+    base_name: str,
+    output_name: str,
+    arrow_fn: Any,
 ) -> None:
     for suffix, size in SIZES.items():
         base_path = RESOURCES / f"{base_name}{suffix}.png"

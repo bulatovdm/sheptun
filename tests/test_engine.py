@@ -284,9 +284,7 @@ class TestBaseVoiceEngine:
 
             assert not engine.is_running()
 
-    def test_speech_detected_queues_for_recognition(
-        self, command_parser: CommandParser
-    ) -> None:
+    def test_speech_detected_queues_for_recognition(self, command_parser: CommandParser) -> None:
         result = RecognitionResult(text="привет", confidence=0.9)
         recognizer = MockRecognizer(result=result)
         keyboard = MockKeyboardSender()
@@ -306,9 +304,7 @@ class TestBaseVoiceEngine:
 
             engine.stop()
 
-    def test_recognition_worker_processes_speech(
-        self, command_parser: CommandParser
-    ) -> None:
+    def test_recognition_worker_processes_speech(self, command_parser: CommandParser) -> None:
         result = RecognitionResult(text="привет", confidence=0.9)
         recognizer = MockRecognizer(result=result)
         keyboard = MockKeyboardSender()
@@ -328,9 +324,7 @@ class TestBaseVoiceEngine:
 
             assert "привет" in keyboard.sent_text
 
-    def test_multiple_phrases_processed_sequentially(
-        self, command_parser: CommandParser
-    ) -> None:
+    def test_multiple_phrases_processed_sequentially(self, command_parser: CommandParser) -> None:
         results = [
             RecognitionResult(text="раз", confidence=0.9),
             RecognitionResult(text="два", confidence=0.9),
@@ -360,9 +354,7 @@ class TestBaseVoiceEngine:
             assert "три" in keyboard.sent_text
             assert recognizer._call_count == 3
 
-    def test_speech_detected_ignored_when_idle(
-        self, command_parser: CommandParser
-    ) -> None:
+    def test_speech_detected_ignored_when_idle(self, command_parser: CommandParser) -> None:
         result = RecognitionResult(text="привет", confidence=0.9)
         recognizer = MockRecognizer(result=result)
         keyboard = MockKeyboardSender()
@@ -380,9 +372,7 @@ class TestBaseVoiceEngine:
             assert engine._recognition_queue.empty()
             assert len(keyboard.sent_text) == 0
 
-    def test_stop_waits_for_pending_recognition(
-        self, command_parser: CommandParser
-    ) -> None:
+    def test_stop_waits_for_pending_recognition(self, command_parser: CommandParser) -> None:
         result = RecognitionResult(text="тест", confidence=0.9)
         recognizer = MockRecognizer(result=result, delay=0.1)
         keyboard = MockKeyboardSender()
@@ -429,9 +419,7 @@ class TestBaseVoiceEngine:
 
             engine.stop()
 
-    def test_engine_works_after_stop_and_restart(
-        self, command_parser: CommandParser
-    ) -> None:
+    def test_engine_works_after_stop_and_restart(self, command_parser: CommandParser) -> None:
         results = [
             RecognitionResult(text="до", confidence=0.9),
             RecognitionResult(text="после", confidence=0.9),
@@ -459,9 +447,7 @@ class TestBaseVoiceEngine:
 
             assert "после" in keyboard.sent_text
 
-    def test_start_creates_fresh_recorder(
-        self, command_parser: CommandParser
-    ) -> None:
+    def test_start_creates_fresh_recorder(self, command_parser: CommandParser) -> None:
         status = MockStatusIndicator()
         recognizer = MockRecognizer()
         keyboard = MockKeyboardSender()
@@ -481,9 +467,7 @@ class TestBaseVoiceEngine:
 
             assert MockRecorder.call_count == 2
 
-    def test_start_creates_fresh_recognition_queue(
-        self, command_parser: CommandParser
-    ) -> None:
+    def test_start_creates_fresh_recognition_queue(self, command_parser: CommandParser) -> None:
         status = MockStatusIndicator()
         recognizer = MockRecognizer()
         keyboard = MockKeyboardSender()
@@ -505,9 +489,7 @@ class TestBaseVoiceEngine:
 
             assert first_queue is not second_queue
 
-    def test_no_stale_events_across_toggle_cycles(
-        self, command_parser: CommandParser
-    ) -> None:
+    def test_no_stale_events_across_toggle_cycles(self, command_parser: CommandParser) -> None:
         results = [
             RecognitionResult(text="сессия1", confidence=0.9),
             RecognitionResult(text="сессия2", confidence=0.9),

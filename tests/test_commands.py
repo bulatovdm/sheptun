@@ -216,8 +216,10 @@ control_commands: {}
 гитхаб: GitHub
 питон: Python
 """
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as cf, \
-             tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as rf:
+        with (
+            tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as cf,
+            tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as rf,
+        ):
             cf.write(commands_content)
             cf.flush()
             rf.write(replacements_content)

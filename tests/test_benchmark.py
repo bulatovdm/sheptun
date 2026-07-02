@@ -29,7 +29,14 @@ def _write_test_wav(path: Path, samples: int = 16000, sample_rate: int = 16000) 
 
 class TestFileResult:
     def test_rtf_field(self) -> None:
-        r = FileResult(filename="a.wav", text="тест", reference=None, inference_time=0.5, audio_duration=2.0, rtf=0.25)
+        r = FileResult(
+            filename="a.wav",
+            text="тест",
+            reference=None,
+            inference_time=0.5,
+            audio_duration=2.0,
+            rtf=0.25,
+        )
         assert r.rtf == 0.25
 
 

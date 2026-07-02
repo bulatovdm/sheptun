@@ -240,5 +240,3 @@ def load_transcripts(transcripts_path: Path) -> list[TranscriptRecord]:
                 )
             )
     return records
-
-

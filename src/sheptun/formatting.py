@@ -1,12 +1,41 @@
 import re
 from functools import partial
 
-_EXTENSIONS = frozenset({
-    "env", "php", "py", "js", "ts", "jsx", "tsx", "yaml", "yml",
-    "json", "md", "html", "css", "txt", "sh", "sql", "go", "rs",
-    "rb", "vue", "svelte", "xml", "toml", "cfg", "ini", "log",
-    "gitignore", "dockerignore", "editorconfig", "lock", "map",
-})
+_EXTENSIONS = frozenset(
+    {
+        "env",
+        "php",
+        "py",
+        "js",
+        "ts",
+        "jsx",
+        "tsx",
+        "yaml",
+        "yml",
+        "json",
+        "md",
+        "html",
+        "css",
+        "txt",
+        "sh",
+        "sql",
+        "go",
+        "rs",
+        "rb",
+        "vue",
+        "svelte",
+        "xml",
+        "toml",
+        "cfg",
+        "ini",
+        "log",
+        "gitignore",
+        "dockerignore",
+        "editorconfig",
+        "lock",
+        "map",
+    }
+)
 
 _SNAKE_EXTENSIONS = frozenset({"py", "rb", "sh", "sql"})
 _CAMEL_EXTENSIONS = frozenset({"js", "ts", "jsx", "tsx", "vue", "svelte"})
@@ -56,9 +85,7 @@ _TOCHKA_EXT = re.compile(
     re.IGNORECASE,
 )
 
-_SINGLE_TIRE_LATIN = re.compile(
-    r"(?<=[a-zA-Z])\s+тире\s+(?=[a-zA-Z])", re.IGNORECASE
-)
+_SINGLE_TIRE_LATIN = re.compile(r"(?<=[a-zA-Z])\s+тире\s+(?=[a-zA-Z])", re.IGNORECASE)
 
 _SLASH_PREFIXES_LOWER = ("слэш ", "слеш ", "слышь ")
 
@@ -114,7 +141,6 @@ _CASING_FUNCS = {
 
 
 class TechnicalFormatter:
-
     def format(self, text: str) -> str:
         result, had_casing = self._apply_casing_command(text)
         if had_casing:
@@ -137,7 +163,7 @@ class TechnicalFormatter:
         for pattern, style in _CASING_COMMANDS:
             m = pattern.match(text)
             if m:
-                words = text[m.end():].split()
+                words = text[m.end() :].split()
                 if words:
                     return _CASING_FUNCS[style](words), True
                 return "", True

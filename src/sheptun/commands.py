@@ -33,9 +33,7 @@ class CommandConfig:
 
 class CommandConfigLoader:
     @staticmethod
-    def load(
-        config_path: Path, replacements_path: Path | None = None
-    ) -> CommandConfig:
+    def load(config_path: Path, replacements_path: Path | None = None) -> CommandConfig:
         with config_path.open(encoding="utf-8") as f:
             raw_config = yaml.safe_load(f)
 

@@ -92,9 +92,7 @@ def _run_on_main_sync(func: Callable[[], None]) -> None:
         return
 
     runner = _MainThreadRunner.alloc().initWithCallable_(func)
-    runner.performSelectorOnMainThread_withObject_waitUntilDone_(
-        b"execute:", None, True
-    )
+    runner.performSelectorOnMainThread_withObject_waitUntilDone_(b"execute:", None, True)
     if runner._exception is not None:
         raise runner._exception
 

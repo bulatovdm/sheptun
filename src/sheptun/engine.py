@@ -76,9 +76,7 @@ class BaseVoiceEngine:
         self._on_start()
         self._recognizer.start_warmup()
         self._recognition_queue = queue.Queue()
-        self._recognition_thread = threading.Thread(
-            target=self._recognition_worker, daemon=True
-        )
+        self._recognition_thread = threading.Thread(target=self._recognition_worker, daemon=True)
         self._recognition_thread.start()
         self._recorder = ContinuousAudioRecorder(self._audio_config, self._vad_config)
         self._recorder.set_speech_start_callback(self._on_speech_started)

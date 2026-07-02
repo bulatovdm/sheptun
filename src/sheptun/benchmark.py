@@ -34,8 +34,8 @@ class FileResult:
     inference_time: float
     audio_duration: float
     rtf: float
-    cer_norm: float | None = None   # CER после нормализации (без пунктуации, lowercase)
-    cer_raw: float | None = None    # CER with punctuation
+    cer_norm: float | None = None  # CER после нормализации (без пунктуации, lowercase)
+    cer_raw: float | None = None  # CER with punctuation
 
 
 @dataclass
@@ -307,7 +307,9 @@ def _print_summary(results: list[BenchmarkResult], has_refs: bool) -> None:
 
     console.print(table)
     if has_refs:
-        console.print("[dim]CER норм. = без пунктуации/регистра  |  CER точн. = с пунктуацией[/dim]")
+        console.print(
+            "[dim]CER норм. = без пунктуации/регистра  |  CER точн. = с пунктуацией[/dim]"
+        )
 
 
 def run_benchmark(
@@ -325,7 +327,9 @@ def run_benchmark(
         console.print("[red]Аудиофайлы не найдены[/red]")
         return []
 
-    ref_note = f", {sum(1 for f in files if f.name in refs)}/{len(files)} с эталонами" if refs else ""
+    ref_note = (
+        f", {sum(1 for f in files if f.name in refs)}/{len(files)} с эталонами" if refs else ""
+    )
     console.print(
         f"[bold]Бенчмарк: {len(models)} модел(ей) × {len(files)} файл(ов){ref_note}[/bold]"
     )

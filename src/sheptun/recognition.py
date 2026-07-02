@@ -26,9 +26,7 @@ _MIN_VIABLE_WORDS = 2
 _MIN_VIABLE_CHARS = 5
 
 
-def _has_phrase_repetition(
-    text: str, max_phrase_len: int = 4, min_repeats: int = 3
-) -> bool:
+def _has_phrase_repetition(text: str, max_phrase_len: int = 4, min_repeats: int = 3) -> bool:
     words = text.split()
     if len(words) < 6:
         return False
@@ -283,7 +281,9 @@ class WhisperRecognizer(_WarmupMixin):
         self._model: Any = whisper.load_model(model_name, device=device)
         self._model_name = model_name
         self._hallucinations = {h.lower() for h in (hallucinations or settings.hallucinations)}
-        self._initial_prompt = initial_prompt if initial_prompt is not None else settings.initial_prompt
+        self._initial_prompt = (
+            initial_prompt if initial_prompt is not None else settings.initial_prompt
+        )
         self._init_warmup(warmup_interval)
 
     @property
@@ -482,7 +482,9 @@ class MLXWhisperRecognizer(_WarmupMixin):
         self._model_repo = resolve_mlx_model(model_name)
         self._model_name = model_name
         self._hallucinations = {h.lower() for h in (hallucinations or settings.hallucinations)}
-        self._initial_prompt = initial_prompt if initial_prompt is not None else settings.initial_prompt
+        self._initial_prompt = (
+            initial_prompt if initial_prompt is not None else settings.initial_prompt
+        )
         self._transcribe_lock = threading.Lock()
         self._init_warmup(warmup_interval)
 
