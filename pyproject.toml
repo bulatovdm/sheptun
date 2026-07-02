@@ -42,6 +42,13 @@ spelling = [
     "transformers>=4.30.0",
     "sentencepiece>=0.1.99",
 ]
+bench = [
+    # Text-correction benchmarks (benchmarks/). SAGE via transformers; JamSpell is
+    # installed manually (its wheel needs SWIG 3) — see benchmarks/README.md.
+    "transformers>=4.30.0",
+    "sentencepiece>=0.1.99",
+    "torch>=2.0.0",
+]
 silero = [
     "silero-vad>=5.1",
 ]
@@ -83,12 +90,12 @@ allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sheptun"]
-artifacts = ["*.md", "*.yaml"]
+artifacts = ["*.md", "*.yaml", "py.typed"]
 
 [tool.ruff]
 target-version = "py311"
 line-length = 100
-src = ["src"]
+src = ["src", "benchmarks"]
 
 [tool.ruff.lint]
 select = [
@@ -113,7 +120,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["sheptun"]
+known-first-party = ["sheptun", "benchmarks"]
 
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["sheptun.settings._get_path", "sheptun.settings._get_tuple"]
@@ -161,6 +168,7 @@ module = [
     "librosa.*",
     "nemo.*",
     "anthropic.*",
+    "jamspell.*",
 ]
 ignore_missing_imports = true
 
