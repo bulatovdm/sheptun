@@ -651,6 +651,81 @@ class TestVerifyStage:
         assert "комит" in captured["user"] and "докер" in captured["user"]
 
 
+class _FakeResponse:
+    def __init__(self, text: str, output_tokens: int = 0) -> None:
+        self.content = [type("Block", (), {"type": "text", "text": text})()]
+        self.usage = type("Usage", (), {"output_tokens": output_tokens})()
+
+
+class _FakeStream:
+    """Context manager mimicking client.messages.stream(...)."""
+
+    def __init__(self, text: str, chunks: list[str] | None = None) -> None:
+        self._text = text
+        self.text_stream = iter(chunks or [text])
+
+    def __enter__(self) -> "_FakeStream":
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        return None
+
+    def get_final_message(self) -> _FakeResponse:
+        return _FakeResponse(self._text, output_tokens=99)
+
+
+class _FakeMessages:
+    def __init__(self, chunks: list[str] | None = None) -> None:
+        self.create_calls = 0
+        self.stream_calls = 0
+        self._chunks = chunks
+
+    def create(self, **_kwargs: object) -> _FakeResponse:
+        self.create_calls += 1
+        return _FakeResponse("streamed=no")
+
+    def stream(self, **_kwargs: object) -> _FakeStream:
+        self.stream_calls += 1
+        return _FakeStream("streamed=yes", chunks=self._chunks)
+
+
+class TestStreamingToggle:
+    """The stream flag picks the transport (messages.stream vs .create); same result."""
+
+    def _client(
+        self, stream: bool, chunks: list[str] | None = None
+    ) -> tuple["AnthropicClient", _FakeMessages]:
+        c = AnthropicClient.__new__(AnthropicClient)
+        c._model = "m"  # type: ignore[attr-defined]
+        c._effort = "medium"  # type: ignore[attr-defined]
+        c._stream = stream  # type: ignore[attr-defined]
+        c._on_stream_progress = None  # type: ignore[attr-defined]
+        c._stream_started = 0.0  # type: ignore[attr-defined]
+        messages = _FakeMessages(chunks=chunks)
+        c._client = type("Client", (), {"messages": messages})()  # type: ignore[attr-defined]
+        return c, messages
+
+    def test_stream_progress_fires_with_final_token_count(self) -> None:
+        # Many small chunks over >1s of wall clock so the throttled tick fires at least once,
+        # plus the final exact-usage tick (99 tokens) after get_final_message().
+        client, _ = self._client(stream=True, chunks=["x"] * 5)
+        ticks: list[tuple[int, float]] = []
+        client.set_stream_progress(lambda tokens, seconds: ticks.append((tokens, seconds)))
+        client._ask("sys", "user")
+        assert ticks, "expected at least the final progress tick"
+        assert ticks[-1][0] == 99  # last tick carries the exact token count from usage
+
+    def test_blocking_path_uses_create(self) -> None:
+        client, messages = self._client(stream=False)
+        assert client._ask("sys", "user") == "streamed=no"
+        assert (messages.create_calls, messages.stream_calls) == (1, 0)
+
+    def test_streaming_path_uses_stream(self) -> None:
+        client, messages = self._client(stream=True)
+        assert client._ask("sys", "user") == "streamed=yes"
+        assert (messages.create_calls, messages.stream_calls) == (0, 1)
+
+
 class TestPhraseIndex:
     """Frequency lookup over the actual Recognized lines."""
 

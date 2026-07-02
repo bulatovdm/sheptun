@@ -137,13 +137,16 @@ class Settings:
     analyzer_batch_size: int = int(_get_float("SHEPTUN_ANALYZER_BATCH_SIZE", 20))
     analyzer_max_windows: int = int(_get_float("SHEPTUN_ANALYZER_MAX_WINDOWS", 0))  # 0 = no limit
     analyzer_min_freq: int = int(_get_float("SHEPTUN_ANALYZER_MIN_FREQ", 1))
-    analyzer_effort: str = _get_str("SHEPTUN_ANALYZER_EFFORT", "high")
+    analyzer_effort: str = _get_str("SHEPTUN_ANALYZER_EFFORT", "medium")
     # Minimum confidence to keep a suggestion: low | medium | high
     analyzer_min_confidence: str = _get_str("SHEPTUN_ANALYZER_MIN_CONFIDENCE", "medium")
     # Max model requests (batches) per run — 0 = unlimited. Bounds cost/time per run.
     analyzer_max_iterations: int = int(_get_float("SHEPTUN_ANALYZER_MAX_ITERATIONS", 0))
     # Second verification pass: a critic call re-checks candidates (extra request per batch).
     analyzer_verify: bool = _get_bool("SHEPTUN_ANALYZER_VERIFY", True)
+    # Stream model responses (SSE) so a long generation keeps the connection alive and
+    # doesn't hit a proxy read-timeout (Cloudflare 524). Same result, different transport.
+    analyzer_stream: bool = _get_bool("SHEPTUN_ANALYZER_STREAM", False)
     # SDK-level retries per request — 0 = fail fast; our own backoff loop handles retries instead.
     analyzer_max_retries: int = int(_get_float("SHEPTUN_ANALYZER_MAX_RETRIES", 0))
     # Pause (seconds) between successful model requests — eases load on the proxy/origin (502s).

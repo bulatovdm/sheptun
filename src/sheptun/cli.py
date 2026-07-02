@@ -1,3 +1,4 @@
+import contextlib
 import logging
 import signal
 import sys
@@ -272,6 +273,13 @@ def analyze_replacements(
             help="Второй проход-критик, перепроверяющий кандидатов (по умолчанию вкл)",
         ),
     ] = None,
+    stream: Annotated[
+        bool | None,
+        typer.Option(
+            "--stream/--no-stream",
+            help="Стримить ответы модели (SSE) — лечит таймаут прокси 524 на долгих запросах",
+        ),
+    ] = None,
     delay: Annotated[
         float | None,
         typer.Option("--delay", help="Пауза (сек) между запросами к модели"),
@@ -388,6 +396,8 @@ def analyze_replacements(
         analyzer_config.max_iterations = max_iterations
     if verify is not None:
         analyzer_config.verify = verify
+    if stream is not None:
+        analyzer_config.stream = stream
     if delay is not None:
         analyzer_config.delay = delay
     if retry_backoff is not None:
@@ -460,7 +470,22 @@ def analyze_replacements(
                 f"{ev.attempt}/{ev.max_attempts}), жду {ev.wait:.0f}с: {brief}"
             )
 
-    result = analyzer.analyze_windows(windows, existing, on_progress=on_progress, on_retry=on_retry)
+    # При стриминге показываем живой спиннер: он корректно перерисовывает одну строку
+    # (в отличие от '\r') и пропускает над собой обычный вывод on_progress между батчами.
+    if analyzer_config.stream:
+        status = console.status("[dim]запрос…[/dim]", spinner="dots")
+
+        def on_stream(tokens: int, seconds: float) -> None:
+            status.update(f"[dim]генерирую… {tokens} ток., {seconds:.0f}с[/dim]")
+
+        analyzer.set_stream_progress(on_stream)
+    else:
+        status = contextlib.nullcontext()  # type: ignore[assignment]
+
+    with status:
+        result = analyzer.analyze_windows(
+            windows, existing, on_progress=on_progress, on_retry=on_retry
+        )
 
     # Прогон мог прерваться на батче (502 прокси и т.п.). Позиция уже сохранена по ходу
     # в on_progress, но фиксируем финальное значение ещё раз — на случай гонок/частичного

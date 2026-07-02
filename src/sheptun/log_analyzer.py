@@ -45,6 +45,10 @@ VERIFY_PROMPT_NAME = "replacements_verify"
 _DATE_ONLY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _DATE_TIME = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$")
 
+# Streaming sub-progress: report at most once a second, estimate tokens from chars.
+_STREAM_TICK_SECONDS = 1.0
+_CHARS_PER_TOKEN = 4
+
 
 def normalize_since(value: str) -> str:
     """Normalize a user date to the log timestamp format for a lower bound.
@@ -205,6 +209,10 @@ class RetryEvent:
 
 RetryCallback = Callable[[RetryEvent], None]
 
+# Live sub-progress during a streamed generation: (output_tokens_so_far, seconds_elapsed).
+# Only fires on the streaming path; lets the CLI show a request is alive, not frozen.
+StreamProgressCallback = Callable[[int, float], None]
+
 
 @dataclass
 class AnalyzerConfig:
@@ -219,6 +227,7 @@ class AnalyzerConfig:
     min_confidence: str = field(default_factory=lambda: settings.analyzer_min_confidence)
     max_iterations: int = field(default_factory=lambda: settings.analyzer_max_iterations)
     verify: bool = field(default_factory=lambda: settings.analyzer_verify)
+    stream: bool = field(default_factory=lambda: settings.analyzer_stream)
     delay: float = field(default_factory=lambda: settings.analyzer_delay)
     retry_backoff: float = field(default_factory=lambda: settings.analyzer_retry_backoff)
     max_error_retries: int = field(default_factory=lambda: settings.analyzer_max_error_retries)
@@ -436,12 +445,20 @@ class AnthropicClient:
         effort: str,
         verify: bool = False,
         phrase_index: PhraseIndex | None = None,
+        stream: bool = False,
     ) -> None:
         self._model = model
         self._effort = effort
         self._verify = verify
         self._phrase_index = phrase_index
+        self._stream = stream
+        self._on_stream_progress: StreamProgressCallback | None = None
+        self._stream_started = 0.0
         self._client = self._make_client()
+
+    def set_stream_progress(self, callback: StreamProgressCallback | None) -> None:
+        """Wire a live token/seconds callback fired during streamed generation."""
+        self._on_stream_progress = callback
 
     @staticmethod
     def _make_client() -> Any:
@@ -505,18 +522,56 @@ class AnthropicClient:
         self._phrase_index = index
 
     def _ask(self, system: str, user: str) -> str:
-        """One model call; returns the text of the first text block."""
-        response = self._client.messages.create(
-            model=self._model,
-            max_tokens=8000,
-            system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
-            output_config={"effort": self._effort},
-            messages=[{"role": "user", "content": user}],
-        )
+        """One model call; returns the text of the first text block.
+
+        Streaming (SSE) is used when enabled: it keeps the connection fed with data
+        so a long generation doesn't trip a proxy read-timeout (Cloudflare 524). The
+        returned text is identical to the non-streaming path.
+        """
+        params: dict[str, Any] = {
+            "model": self._model,
+            "max_tokens": 8000,
+            "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+            "output_config": {"effort": self._effort},
+            "messages": [{"role": "user", "content": user}],
+        }
+        response = self._ask_streaming(params) if self._stream else self._ask_blocking(params)
         return next(
             (block.text for block in response.content if getattr(block, "type", "") == "text"),
             "",
         )
+
+    def _ask_blocking(self, params: dict[str, Any]) -> Any:
+        return self._client.messages.create(**params)
+
+    def _ask_streaming(self, params: dict[str, Any]) -> Any:
+        with self._client.messages.stream(**params) as stream:
+            if self._on_stream_progress is not None:
+                self._pump_progress(stream)
+            message = stream.get_final_message()
+            if self._on_stream_progress is not None:
+                # Final tick with the exact token count from usage (deltas were approximate).
+                tokens = getattr(getattr(message, "usage", None), "output_tokens", 0) or 0
+                self._on_stream_progress(int(tokens), time.perf_counter() - self._stream_started)
+            return message
+
+    def _pump_progress(self, stream: Any) -> None:
+        """Consume text deltas, reporting approximate tokens + elapsed seconds live.
+
+        Tokens are estimated from character count (~4 chars/token) — the proxy may not
+        surface per-delta usage, so we approximate during the run and correct at the end
+        from ``usage.output_tokens``. Throttled to once a second to avoid console spam.
+        """
+        assert self._on_stream_progress is not None
+        self._stream_started = time.perf_counter()
+        chars = 0
+        last_tick = 0.0
+        for text in stream.text_stream:
+            chars += len(text)
+            elapsed = time.perf_counter() - self._stream_started
+            if elapsed - last_tick >= _STREAM_TICK_SECONDS:
+                self._on_stream_progress(chars // _CHARS_PER_TOKEN, elapsed)
+                last_tick = elapsed
 
     def _verify_suggestions(
         self, suggestions: list[ReplacementSuggestion]
@@ -576,10 +631,19 @@ class ReplacementAnalyzer:
         )
         self._batcher = WindowBatcher(self._config.batch_size)
         self._client = client or AnthropicClient(
-            self._config.model, self._config.effort, verify=self._config.verify
+            self._config.model,
+            self._config.effort,
+            verify=self._config.verify,
+            stream=self._config.stream,
         )
         self._full_total = 0
         self._applied_offset = 0
+
+    def set_stream_progress(self, callback: StreamProgressCallback | None) -> None:
+        """Forward a live streaming-progress callback to the client, if it supports one."""
+        setter = getattr(self._client, "set_stream_progress", None)
+        if setter is not None:
+            setter(callback)
 
     @property
     def full_total(self) -> int:
