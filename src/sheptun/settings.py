@@ -99,10 +99,13 @@ class Settings:
     record_dataset: bool = _get_bool("SHEPTUN_RECORD_DATASET", False)
     dataset_path: Path = _get_path("SHEPTUN_DATASET_PATH", _DEFAULT_DATASET_PATH)
     hallucinations: tuple[str, ...] = _get_tuple("SHEPTUN_HALLUCINATIONS", _DEFAULT_HALLUCINATIONS)
-    use_clipboard: bool = _get_bool("SHEPTUN_USE_CLIPBOARD", False)
+    # Clipboard paste (Cmd+V) is atomic and avoids the character-duplication that
+    # synthesized key events cause in Electron terminals (VS Code). The paste is
+    # marked concealed/transient so it stays out of clipboard-manager history.
+    use_clipboard: bool = _get_bool("SHEPTUN_USE_CLIPBOARD", True)
     key_delay: float = _get_float("SHEPTUN_KEY_DELAY", 0.02)  # Low values may cause duplicates
     warmup_interval: float = _get_float("SHEPTUN_WARMUP_INTERVAL", 120.0)  # seconds, 0 to disable
-    auto_space: bool = _get_bool("SHEPTUN_AUTO_SPACE", True)  # Add leading space to text
+    auto_space: bool = _get_bool("SHEPTUN_AUTO_SPACE", True)  # Add trailing space to text
     # Spell correction: none, t5-russian (200M)
     spell_correction: str = _get_str("SHEPTUN_SPELL_CORRECTION", "none")
     # Whisper initial_prompt: context hint for better recognition of domain terms.

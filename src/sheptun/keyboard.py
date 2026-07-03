@@ -20,10 +20,21 @@ logger = logging.getLogger("sheptun.keyboard")
 
 NSData: Any = getattr(AppKit, "NSData")  # noqa: B009
 NSPasteboard: Any = getattr(AppKit, "NSPasteboard")  # noqa: B009
+NSPasteboardItem: Any = getattr(AppKit, "NSPasteboardItem")  # noqa: B009
 NSPasteboardType: Any = getattr(AppKit, "NSPasteboardType")  # noqa: B009
 NSPasteboardTypeString: Any = getattr(AppKit, "NSPasteboardTypeString")  # noqa: B009
 
+# Transient: weak "will be overwritten soon" hint (Maccy/Alfred honor it).
+# Concealed: strong "do not record" marker for sensitive data — honored by
+# clipboard managers like CopyClip that ignore TransientType. We set both so our
+# paste stays out of clipboard history regardless of which manager is running.
 TRANSIENT_PASTEBOARD_TYPE = "org.nspasteboard.TransientType"
+CONCEALED_PASTEBOARD_TYPE = "org.nspasteboard.ConcealedType"
+
+# One snapshot per NSPasteboardItem: its (type, data) pairs across every type it
+# carries. Preserves images/files/RTF, not just plain text, so restoring the
+# user's clipboard after a paste never drops non-text content.
+ClipboardSnapshot = list[list[tuple[str, Any]]]
 
 CGEventCreateKeyboardEvent: Any = getattr(Quartz, "CGEventCreateKeyboardEvent")  # noqa: B009
 CGEventKeyboardSetUnicodeString: Any = getattr(  # noqa: B009
@@ -238,25 +249,29 @@ class MacOSKeyboardSender:
     def _send_via_clipboard(self, text: str) -> None:
         def _inner() -> None:
             logger.debug(f"Sending text via clipboard: '{text}' (len={len(text)})")
-            old_contents = self._get_clipboard()
-            old_change_count = self._pasteboard.changeCount()
+            snapshot = self._snapshot_clipboard()
 
             self._set_clipboard(text)
             time.sleep(0.05)
             self._paste()
             time.sleep(0.05)
 
-            if old_contents is not None:
-                self._restore_clipboard(old_contents)
-            elif self._pasteboard.changeCount() != old_change_count:
-                self._pasteboard.clearContents()
+            self._restore_clipboard(snapshot)
             logger.debug("Clipboard send complete")
 
         _run_on_main_sync(_inner)
 
-    def _get_clipboard(self) -> str | None:
-        result: str | None = self._pasteboard.stringForType_(NSPasteboardTypeString)
-        return result
+    def _snapshot_clipboard(self) -> ClipboardSnapshot:
+        items = self._pasteboard.pasteboardItems() or []
+        snapshot: ClipboardSnapshot = []
+        for item in items:
+            entry: list[tuple[str, Any]] = []
+            for item_type in item.types():
+                data = item.dataForType_(item_type)
+                if data is not None:
+                    entry.append((str(item_type), data))
+            snapshot.append(entry)
+        return snapshot
 
     def _set_clipboard(self, text: str) -> None:
         self._pasteboard.clearContents()
@@ -264,10 +279,21 @@ class MacOSKeyboardSender:
         self._pasteboard.setData_forType_(
             NSData.data(), NSPasteboardType(TRANSIENT_PASTEBOARD_TYPE)
         )
+        self._pasteboard.setData_forType_(
+            NSData.data(), NSPasteboardType(CONCEALED_PASTEBOARD_TYPE)
+        )
 
-    def _restore_clipboard(self, text: str) -> None:
+    def _restore_clipboard(self, snapshot: ClipboardSnapshot) -> None:
+        if not snapshot:
+            return
         self._pasteboard.clearContents()
-        self._pasteboard.setString_forType_(text, NSPasteboardTypeString)
+        items = []
+        for entry in snapshot:
+            item = NSPasteboardItem.alloc().init()
+            for item_type, data in entry:
+                item.setData_forType_(data, NSPasteboardType(item_type))
+            items.append(item)
+        self._pasteboard.writeObjects_(items)
 
     def _paste(self) -> None:
         self._send_key_event(KEY_CODES["v"].code, kCGEventFlagMaskCommand)
