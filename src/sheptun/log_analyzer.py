@@ -224,6 +224,8 @@ class AnalyzerConfig:
     min_freq: int = field(default_factory=lambda: settings.analyzer_min_freq)
     model: str = field(default_factory=lambda: settings.analyzer_model)
     effort: str = field(default_factory=lambda: settings.analyzer_effort)
+    max_tokens: int = field(default_factory=lambda: settings.analyzer_max_tokens)
+    thinking: bool = field(default_factory=lambda: settings.analyzer_thinking)
     min_confidence: str = field(default_factory=lambda: settings.analyzer_min_confidence)
     max_iterations: int = field(default_factory=lambda: settings.analyzer_max_iterations)
     verify: bool = field(default_factory=lambda: settings.analyzer_verify)
@@ -447,9 +449,13 @@ class AnthropicClient:
         verify: bool = False,
         phrase_index: PhraseIndex | None = None,
         stream: bool = False,
+        thinking: bool = False,
+        max_tokens: int = 12000,
     ) -> None:
         self._model = model
         self._effort = effort
+        self._thinking = thinking
+        self._max_tokens = max_tokens
         self._verify = verify
         self._phrase_index = phrase_index
         self._stream = stream
@@ -531,15 +537,49 @@ class AnthropicClient:
         """
         params: dict[str, Any] = {
             "model": self._model,
-            "max_tokens": 8000,
+            "max_tokens": self._max_tokens,
             "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
-            "output_config": {"effort": self._effort},
             "messages": [{"role": "user", "content": user}],
+            **self._thinking_params(),
         }
+        mode = "stream" if self._stream else "blocking"
+        reasoning = f"effort={self._effort}" if self._thinking else "thinking=off"
+        logger.info("Запрос к модели %s (%s, %s)…", self._model, mode, reasoning)
+        started = time.perf_counter()
         response = self._ask_streaming(params) if self._stream else self._ask_blocking(params)
+        self._log_request_metrics(response, mode, time.perf_counter() - started)
         return next(
             (block.text for block in response.content if getattr(block, "type", "") == "text"),
             "",
+        )
+
+    def _thinking_params(self) -> dict[str, Any]:
+        """Reasoning knobs for the request.
+
+        Off (default): disable thinking so the model answers short and complete instead
+        of burning the whole output budget on reasoning tokens (hits max_tokens, truncates
+        the JSON, ~3x slower). On: enable adaptive thinking at the configured effort.
+        """
+        if not self._thinking:
+            return {"thinking": {"type": "disabled"}}
+        return {"thinking": {"type": "adaptive"}, "output_config": {"effort": self._effort}}
+
+    def _log_request_metrics(self, response: Any, mode: str, elapsed: float) -> None:
+        """Log timing + token usage for one request (no prompt content)."""
+        usage = getattr(response, "usage", None)
+        out = getattr(usage, "output_tokens", 0) or 0
+        rate = out / elapsed if elapsed > 0 else 0.0
+        logger.info(
+            "Ответ модели за %.1f c (%s): in=%s out=%s cache_read=%s cache_write=%s"
+            " — %.0f tok/s, stop=%s",
+            elapsed,
+            mode,
+            getattr(usage, "input_tokens", 0) or 0,
+            out,
+            getattr(usage, "cache_read_input_tokens", 0) or 0,
+            getattr(usage, "cache_creation_input_tokens", 0) or 0,
+            rate,
+            getattr(response, "stop_reason", None) or "?",
         )
 
     def _ask_blocking(self, params: dict[str, Any]) -> Any:
@@ -636,6 +676,8 @@ class ReplacementAnalyzer:
             self._config.effort,
             verify=self._config.verify,
             stream=self._config.stream,
+            thinking=self._config.thinking,
+            max_tokens=self._config.max_tokens,
         )
         self._full_total = 0
         self._applied_offset = 0

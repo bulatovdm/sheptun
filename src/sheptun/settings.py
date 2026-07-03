@@ -134,10 +134,20 @@ class Settings:
     # Log analyzer for replacement suggestions
     analyzer_model: str = _get_str("SHEPTUN_ANALYZER_MODEL", "claude-opus-4-8")
     analyzer_context_lines: int = int(_get_float("SHEPTUN_ANALYZER_CONTEXT_LINES", 10))
-    analyzer_batch_size: int = int(_get_float("SHEPTUN_ANALYZER_BATCH_SIZE", 20))
+    # Context windows packed into one model request. Kept small: at 20 the answer overruns
+    # max_tokens=8000 (truncated JSON, dropped rules, ~42s) — at 8 it completes cleanly (end_turn,
+    # ~26s). Fewer windows per request → shorter answer → faster and no truncation on the proxy.
+    analyzer_batch_size: int = int(_get_float("SHEPTUN_ANALYZER_BATCH_SIZE", 8))
     analyzer_max_windows: int = int(_get_float("SHEPTUN_ANALYZER_MAX_WINDOWS", 0))  # 0 = no limit
     analyzer_min_freq: int = int(_get_float("SHEPTUN_ANALYZER_MIN_FREQ", 1))
     analyzer_effort: str = _get_str("SHEPTUN_ANALYZER_EFFORT", "medium")
+    # Output cap per request. At 8000 a dense batch occasionally overruns and truncates the JSON
+    # (stop=max_tokens, dropped rules); 12000 leaves headroom so even rule-heavy batches finish.
+    analyzer_max_tokens: int = int(_get_float("SHEPTUN_ANALYZER_MAX_TOKENS", 12000))
+    # Extended thinking (reasoning). Off by default: with thinking on, Sonnet spends most of
+    # its output budget on reasoning tokens, hitting max_tokens (truncated JSON) and taking
+    # ~3x longer per batch. Off → shorter, faster, complete answers. effort only applies when on.
+    analyzer_thinking: bool = _get_bool("SHEPTUN_ANALYZER_THINKING", False)
     # Minimum confidence to keep a suggestion: low | medium | high
     analyzer_min_confidence: str = _get_str("SHEPTUN_ANALYZER_MIN_CONFIDENCE", "medium")
     # Max model requests (batches) per run — 0 = unlimited. Bounds cost/time per run.
