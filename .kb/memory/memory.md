@@ -6,3 +6,4 @@
 ## Темы
 
 - [Деплой и перезапуск](deploy.md) — правки Python-кода: хватает `sheptun restart`, пересборка `.app` не нужна
+- [Вставка текста](text-insertion.md) — метод по умолчанию clipboard/Cmd+V, ConcealedType против CopyClip, снапшот всех типов буфера, trailing-пробел

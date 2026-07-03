@@ -1,0 +1,17 @@
+# Вставка текста (keyboard.py / engine.py)
+
+## Метод вставки по умолчанию — clipboard (Cmd+V), НЕ события
+`SHEPTUN_USE_CLIPBOARD=true` по умолчанию. Cmd+V атомарен и убирает дублирование символов в терминале VS Code / Electron. Событийный путь `_send_via_events` (`CGEventKeyboardSetUnicodeString`, чанки по 20 симв.) негерметичен в Electron: одно и то же Unicode-событие обрабатывается дважды/перебивается. **Вариант C исчерпан** — пытались слать одним событием без чанков, убирали key-up (`1df52de`), добавляли `CGEventSource`/`NonCoalesced` (`d4ba19a`,`6765012`), крутили `SHEPTUN_KEY_DELAY` (`f7266c3`); полностью дубли не победили. VoiceInk по той же причине держит основным путём буфер, а не typing. Вывод: для терминала надёжен только атомарный Cmd+V.
+Связано: `src/sheptun/keyboard.py` (`send_text`, `_send_via_clipboard`, `_send_via_events`), `src/sheptun/settings.py` (`use_clipboard`). После правки `.env` нужен `sheptun restart` — см. [[deploy]].
+
+## Чтобы вставки не светились в CopyClip — маркер ConcealedType, НЕ blacklist
+Вешаем на буфер `org.nspasteboard.ConcealedType` (сильный «не записывать») вместе с `TransientType` (`_set_clipboard`). CopyClip игнорирует Transient, но уважает Concealed — только так вставки не попадают в его историю (Maccy/Alfred уважают оба). **Blacklist приложения «Sheptun» в CopyClip не работает** by design: агент — фоновый menubar-процесс, никогда не frontmost; менеджер атрибутирует копию активному приложению (VS Code), а не нам. Маркер на буфере — единственный способ, работает независимо от источника.
+Связано: `src/sheptun/keyboard.py` (`TRANSIENT_PASTEBOARD_TYPE`, `CONCEALED_PASTEBOARD_TYPE`, `_set_clipboard`), `tests/test_keyboard.py` (TestClipboardMarkers).
+
+## Восстановление буфера — снапшот ВСЕХ типов, иначе теряются картинки/файлы
+`_send_via_clipboard` одалживает буфер на время вставки и возвращает исходный. Восстанавливать надо все типы через `NSPasteboardItem`, а не только plain-text. Старый код читал только `stringForType_` → для картинки/файла/RTF получал nil и делал `clearContents()`, **уничтожая содержимое буфера** (воспроизводилось: скопировал картинку → наговорил текст → картинки нет). Сейчас `_snapshot_clipboard()` снимает все `(тип, данные)` каждого item, `_restore_clipboard()` пишет их обратно через `writeObjects_`. Проверено побайтово.
+Связано: `src/sheptun/keyboard.py` (`_snapshot_clipboard`, `_restore_clipboard`, `ClipboardSnapshot`), `tests/test_keyboard.py` (TestClipboardSnapshotRestore).
+
+## Пробел между фрагментами — trailing-модель, НЕ подавлять после точки/?/!
+Вставка пробела сделана как **trailing space** (пробел ПОСЛЕ каждого фрагмента, как у VoiceInk), а не leading. Живёт в `_prepare_text` (`src/sheptun/engine.py`), константа `_NO_TRAILING_SPACE_AFTER = frozenset("\n ")`. Грабли: НЕ добавлять `.!?…` в исключения — Whisper сам ставит точку/`?` в конце фразы, и без trailing-пробела следующий фрагмент липнет вплотную («Привет.Что думаешь?»). Пробел подавляем только если фрагмент уже кончается пробелом или `\n`. Старый leading-подход читал позицию курсора через AX (`AXSelectedTextRange`) и давал баг «пробел в начале новой строки» в Apple Notes — удалён вместе с `get_cursor_position`/`has_text_before_cursor`. Trailing-модель принципиально не смотрит назад → на стыке с «чужим» контентом (вставленная вручную картинка/текст) пробела ПЕРЕД нашим текстом не будет — осознанная плата, чинить не стали (KISS).
+Связано: `src/sheptun/engine.py` (`_prepare_text`, `_NO_TRAILING_SPACE_AFTER`), `tests/test_engine.py` (test_prepare_text_*).
