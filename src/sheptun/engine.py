@@ -22,6 +22,11 @@ from sheptun.types import (
 
 logger = logging.getLogger("sheptun")
 
+# A fragment that already ends in whitespace (space or newline) needs no extra
+# trailing space. Sentence-final punctuation (. ! ? …) must still get a space,
+# otherwise the next recognized fragment glues to it: "Привет.Что думаешь?".
+_NO_TRAILING_SPACE_AFTER = frozenset("\n ")
+
 
 class BaseVoiceEngine:
     def __init__(
@@ -45,8 +50,6 @@ class BaseVoiceEngine:
         self._formatter = TechnicalFormatter()
         self._state = AppState.IDLE
         self._lock = threading.Lock()
-        self._current_window_id: str | None = None
-        self._window_text_sent: dict[str, bool] = {}
         self._recognition_queue: queue.Queue[bytes | None] = queue.Queue()
         self._recognition_thread: threading.Thread | None = None
 
@@ -71,7 +74,6 @@ class BaseVoiceEngine:
             if self._state != AppState.IDLE:
                 return
             self._state = AppState.RECORDING_TOGGLE
-            self._window_text_sent.clear()
 
         self._on_start()
         self._recognizer.start_warmup()
@@ -155,7 +157,6 @@ class BaseVoiceEngine:
             return
         self._log("Speech started, capturing focus")
         self._keyboard.start_capture()
-        self._update_current_window()
 
     def _on_speech_detected(self, audio_data: bytes) -> None:
         if self.state == AppState.IDLE:
@@ -223,8 +224,6 @@ class BaseVoiceEngine:
                     text = self._prepare_text(action.value)
                     self._status.show_action(f"Ввод текста: {text}")
                     self._keyboard.send_text(text)
-                    if self._current_window_id:
-                        self._window_text_sent[self._current_window_id] = True
 
             case ActionType.KEY:
                 if isinstance(action.value, str):
@@ -250,35 +249,11 @@ class BaseVoiceEngine:
         self.stop()
 
     def _prepare_text(self, text: str) -> str:
-        if not settings.auto_space or not text or not text[0].isalpha():
+        if not settings.auto_space or not text:
             return text
-        cursor_position = self._keyboard.get_cursor_position()
-        if cursor_position > 0:
-            return " " + text
-        if cursor_position == 0 and self._current_window_id:
-            self._window_text_sent[self._current_window_id] = False
-        text_sent = self._window_text_sent.get(self._current_window_id or "", False)
-        if text_sent:
-            return " " + text
-        return text
-
-    def _update_current_window(self) -> None:
-        new_window = self._get_current_window_id()
-        if new_window != self._current_window_id:
-            self._log(f"Window changed: {self._current_window_id} -> {new_window}")
-        self._current_window_id = new_window
-
-    def _get_current_window_id(self) -> str | None:
-        try:
-            from sheptun.focus import FocusTracker
-
-            tracker = FocusTracker()
-            state = tracker.get_current_state()
-            if state.app_bundle_id:
-                return f"{state.app_bundle_id}:{state.window_title or ''}"
-            return None
-        except Exception:
-            return None
+        if text[-1] in _NO_TRAILING_SPACE_AFTER:
+            return text
+        return text + " "
 
 
 class VoiceEngine(BaseVoiceEngine):

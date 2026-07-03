@@ -81,11 +81,10 @@ class MockRecognizer:
 
 
 class MockKeyboardSender:
-    def __init__(self, cursor_position: int = -1) -> None:
+    def __init__(self) -> None:
         self.sent_text: list[str] = []
         self.sent_keys: list[str] = []
         self.sent_hotkeys: list[list[str]] = []
-        self._cursor_position = cursor_position
 
     def send_text(self, text: str) -> None:
         self.sent_text.append(text)
@@ -101,12 +100,6 @@ class MockKeyboardSender:
 
     def end_capture(self) -> None:
         pass
-
-    def has_text_before_cursor(self) -> bool:
-        return self._cursor_position > 0
-
-    def get_cursor_position(self) -> int:
-        return self._cursor_position
 
 
 @pytest.fixture
@@ -163,7 +156,9 @@ class TestBaseVoiceEngine:
             assert not engine.is_running()
             assert status.idle_called
 
-    def test_execute_text_action_first_in_session(self, command_parser: CommandParser) -> None:
+    def test_execute_text_action_appends_trailing_space(
+        self, command_parser: CommandParser
+    ) -> None:
         status = MockStatusIndicator()
         recognizer = MockRecognizer()
         keyboard = MockKeyboardSender()
@@ -177,9 +172,9 @@ class TestBaseVoiceEngine:
             )
             action = Action(ActionType.TEXT, "hello")
             engine._execute_action(action)
-            assert "hello" in keyboard.sent_text
+            assert keyboard.sent_text == ["hello "]
 
-    def test_execute_text_action_subsequent_adds_space(self, command_parser: CommandParser) -> None:
+    def test_execute_text_action_no_leading_space(self, command_parser: CommandParser) -> None:
         status = MockStatusIndicator()
         recognizer = MockRecognizer()
         keyboard = MockKeyboardSender()
@@ -191,11 +186,44 @@ class TestBaseVoiceEngine:
                 keyboard_sender=keyboard,  # type: ignore[arg-type]
                 status_indicator=status,  # type: ignore[arg-type]
             )
-            engine._current_window_id = "test-window"
             action = Action(ActionType.TEXT, "hello")
             engine._execute_action(action)
             engine._execute_action(action)
-            assert " hello" in keyboard.sent_text
+            assert keyboard.sent_text == ["hello ", "hello "]
+
+    def test_prepare_text_appends_space(self, command_parser: CommandParser) -> None:
+        engine = self._make_engine(command_parser)
+        assert engine._prepare_text("привет") == "привет "
+
+    def test_prepare_text_no_double_space_when_already_trailing(
+        self, command_parser: CommandParser
+    ) -> None:
+        engine = self._make_engine(command_parser)
+        assert engine._prepare_text("привет ") == "привет "
+
+    def test_prepare_text_appends_space_after_sentence_punctuation(
+        self, command_parser: CommandParser
+    ) -> None:
+        engine = self._make_engine(command_parser)
+        for text in ("Готово.", "Правда?", "Ура!", "Пауза…"):
+            assert engine._prepare_text(text) == text + " "
+
+    def test_prepare_text_no_space_after_newline(self, command_parser: CommandParser) -> None:
+        engine = self._make_engine(command_parser)
+        assert engine._prepare_text("строка\n") == "строка\n"
+
+    def test_prepare_text_empty_stays_empty(self, command_parser: CommandParser) -> None:
+        engine = self._make_engine(command_parser)
+        assert engine._prepare_text("") == ""
+
+    def _make_engine(self, command_parser: CommandParser) -> BaseVoiceEngine:
+        with patch("sheptun.engine.ContinuousAudioRecorder"):
+            return BaseVoiceEngine(
+                recognizer=MockRecognizer(),  # type: ignore[arg-type]
+                command_parser=command_parser,
+                keyboard_sender=MockKeyboardSender(),  # type: ignore[arg-type]
+                status_indicator=MockStatusIndicator(),  # type: ignore[arg-type]
+            )
 
     def test_execute_key_action(self, command_parser: CommandParser) -> None:
         status = MockStatusIndicator()
@@ -322,7 +350,7 @@ class TestBaseVoiceEngine:
             engine._on_speech_detected(b"\x00" * 1000)
             engine.stop()
 
-            assert "привет" in keyboard.sent_text
+            assert "привет " in keyboard.sent_text
 
     def test_multiple_phrases_processed_sequentially(self, command_parser: CommandParser) -> None:
         results = [
@@ -349,9 +377,9 @@ class TestBaseVoiceEngine:
 
             engine.stop()
 
-            assert "раз" in keyboard.sent_text
-            assert "два" in keyboard.sent_text
-            assert "три" in keyboard.sent_text
+            assert "раз " in keyboard.sent_text
+            assert "два " in keyboard.sent_text
+            assert "три " in keyboard.sent_text
             assert recognizer._call_count == 3
 
     def test_speech_detected_ignored_when_idle(self, command_parser: CommandParser) -> None:
@@ -391,7 +419,7 @@ class TestBaseVoiceEngine:
             time.sleep(0.01)
             engine.stop()
 
-            assert "тест" in keyboard.sent_text
+            assert "тест " in keyboard.sent_text
 
     def test_callback_thread_not_blocked_during_recognition(
         self, command_parser: CommandParser
@@ -439,13 +467,13 @@ class TestBaseVoiceEngine:
             engine._on_speech_detected(b"\x00" * 1000)
             engine.stop()
 
-            assert "до" in keyboard.sent_text
+            assert "до " in keyboard.sent_text
 
             engine.start()
             engine._on_speech_detected(b"\x00" * 2000)
             engine.stop()
 
-            assert "после" in keyboard.sent_text
+            assert "после " in keyboard.sent_text
 
     def test_start_creates_fresh_recorder(self, command_parser: CommandParser) -> None:
         status = MockStatusIndicator()
@@ -509,11 +537,11 @@ class TestBaseVoiceEngine:
             engine._on_speech_detected(b"\x00" * 1000)
             engine.stop()
 
-            assert "сессия1" in keyboard.sent_text
+            assert "сессия1 " in keyboard.sent_text
 
             engine.start()
             engine._on_speech_detected(b"\x00" * 2000)
             engine.stop()
 
-            assert "сессия2" in keyboard.sent_text
-            assert keyboard.sent_text.count("сессия1") == 1
+            assert "сессия2 " in keyboard.sent_text
+            assert keyboard.sent_text.count("сессия1 ") == 1
