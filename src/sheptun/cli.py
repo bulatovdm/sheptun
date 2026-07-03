@@ -1,5 +1,6 @@
 import contextlib
 import logging
+import os
 import signal
 import sys
 from datetime import datetime
@@ -471,11 +472,15 @@ def analyze_replacements(
         # Эхо в консоль, чтобы длинная backoff-пауза не выглядела зависанием.
         # Полный текст ошибки — в логе; здесь короткая выжимка.
         brief = ev.error.splitlines()[0][:120]
+        # ev.batch_index is the batch's ORDINAL number (its slot in the queue), not the
+        # completed-count shown in the progress line — under concurrency a later batch (say
+        # #9) can error while the progress counter is still at 4. Say "запрос №N" so the two
+        # numbers don't read as the same scale.
         if ev.gave_up:
-            _error(f"Батч {ev.batch_index}/{ev.batch_total} — попытки исчерпаны: {brief}")
+            _error(f"Запрос №{ev.batch_index} — попытки исчерпаны: {brief}")
         else:
             _hint(
-                f"Батч {ev.batch_index}/{ev.batch_total} — ошибка (попытка "
+                f"Запрос №{ev.batch_index} — ошибка (попытка "
                 f"{ev.attempt}/{ev.max_attempts}), жду {ev.wait:.0f}с: {brief}"
             )
 
@@ -502,12 +507,20 @@ def analyze_replacements(
     state.save(result.position, runs=None)
 
     if result.interrupted:
-        _error("Прогон прерван ошибкой запроса (напр. 502 прокси). Обработано не всё.")
-        _hint(f"Детали ошибки — в {analyzer_log}")
+        _error("Прогон прерван (Ctrl+C или ошибка запроса). Обработано не всё.")
+        _hint(f"Детали — в {analyzer_log}")
         _success(
             f"Прогресс сохранён (позиция {result.position}/{result.full_total}). "
             "Продолжить: запустите снова."
         )
+        if result.aborted_by_user:
+            # In-flight proxy requests (tens of seconds, uncancellable) run on non-daemon
+            # threads that block a normal exit — the interpreter would hang on their join
+            # and a second Ctrl+C dumps a raw traceback. Progress is already saved and all
+            # output is flushed, so exit the process now instead of waiting on them.
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os._exit(0)
 
     if result.processed < result.total and not result.interrupted:
         _hint(f"Обработано окон: {result.processed}/{result.total} (лимит итераций)")

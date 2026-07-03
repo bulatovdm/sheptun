@@ -15,8 +15,10 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 import time
 from collections.abc import Callable, Iterable
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -167,17 +169,24 @@ class AnalysisResult:
     # result still holds the progress from the batches that DID complete, so the
     # caller persists the position instead of losing everything to a traceback.
     interrupted: bool = False
+    # True when the user pressed Ctrl+C. In the parallel path, in-flight proxy requests
+    # can't be cancelled and their non-daemon worker threads block interpreter shutdown,
+    # so the CLI force-exits after saving progress instead of hanging on their join.
+    aborted_by_user: bool = False
 
 
 @dataclass(frozen=True)
 class BatchProgress:
     """Progress after one batch (model request) completes.
 
-    ``position`` is the absolute index reached in the full window set — the caller
-    can persist it after each batch so an interrupted run still resumes.
+    ``batch_index`` is how many batches have completed so far (monotonic 1..total) —
+    for display. ``position`` is the absolute index reached over the contiguous
+    completed prefix — the crash-safe checkpoint the caller persists. Under
+    concurrency the two diverge: batches finish out of order, so more may be *done*
+    than the gap-free prefix the position can safely advance over.
     """
 
-    batch_index: int
+    batch_index: int  # batches completed (display)
     batch_total: int
     windows_done: int
     suggestions_so_far: int
@@ -232,6 +241,7 @@ class AnalyzerConfig:
     stream: bool = field(default_factory=lambda: settings.analyzer_stream)
     send_known: bool = field(default_factory=lambda: settings.analyzer_send_known)
     delay: float = field(default_factory=lambda: settings.analyzer_delay)
+    concurrency: int = field(default_factory=lambda: settings.analyzer_concurrency)
     retry_backoff: float = field(default_factory=lambda: settings.analyzer_retry_backoff)
     max_error_retries: int = field(default_factory=lambda: settings.analyzer_max_error_retries)
     since: str | None = None  # explicit range only: keep lines with timestamp > since
@@ -656,6 +666,75 @@ class NoopClient:
         del index  # dry-run stub — nothing to index
 
 
+class _DaemonPoolExecutor(ThreadPoolExecutor):
+    """ThreadPoolExecutor whose workers never block interpreter shutdown.
+
+    A request to the proxy can run for tens of seconds and cannot be cancelled
+    mid-flight. The stdlib pool registers every worker in a global registry that an
+    ``atexit`` hook ``join()``s on exit, so after Ctrl+C the process hangs on those
+    in-flight requests until they return — and a second Ctrl+C surfaces a raw
+    ``KeyboardInterrupt`` traceback from deep in ``threading``. We drop our workers from
+    that registry so the exit hook never sees them: the interpreter exits immediately
+    once our own clean shutdown has run, and the abandoned requests die with the process.
+    (We can't mark the threads daemon — they're already started, which raises.)
+    """
+
+    def _adjust_thread_count(self) -> None:
+        super()._adjust_thread_count()
+        import concurrent.futures.thread as _t
+
+        for thread in self._threads:
+            _t._threads_queues.pop(thread, None)  # type: ignore[attr-defined]
+
+
+class _ParallelState:
+    """Shared, thread-safe state for parallel batch processing.
+
+    The checkpoint invariant: ``advance_prefix`` only moves the committed position
+    over a CONTIGUOUS run of finished batches starting at 1. A batch that finishes
+    out of order waits in ``done`` until every earlier batch is also done, so the
+    saved position never jumps past an unfinished (or failed) batch.
+    """
+
+    def __init__(self, existing_seen: set[str]) -> None:
+        self.lock = threading.Lock()
+        self.seen = existing_seen
+        self.accepted: list[ReplacementSuggestion] = []
+        # New suggestions not yet handed to a progress callback (for live reporting).
+        self.uncommitted: list[ReplacementSuggestion] = []
+        self.done: set[int] = set()  # 1-based indices of completed batches
+        self.failed: int | None = None  # smallest failed batch index (barrier)
+        self._prefix = 0  # last committed contiguous batch index
+
+    def snapshot_seen(self) -> set[str]:
+        with self.lock:
+            return set(self.seen)
+
+    def completed_count(self) -> int:
+        with self.lock:
+            return len(self.done)
+
+    def mark_failed(self, index: int) -> None:
+        with self.lock:
+            self.failed = index if self.failed is None else min(self.failed, index)
+
+    def advance_prefix(self) -> int:
+        """Extend the committed prefix over contiguous done batches; return its length."""
+        with self.lock:
+            limit = self.failed - 1 if self.failed is not None else None
+            while (self._prefix + 1) in self.done:
+                if limit is not None and self._prefix + 1 > limit:
+                    break
+                self._prefix += 1
+            return self._prefix
+
+    def drain_uncommitted(self) -> list[ReplacementSuggestion]:
+        with self.lock:
+            out = list(self.uncommitted)
+            self.uncommitted.clear()
+            return out
+
+
 class ReplacementAnalyzer:
     """Orchestrates the pipeline and dedups against existing rules."""
 
@@ -747,13 +826,23 @@ class ReplacementAnalyzer:
         on_progress: ProgressCallback | None = None,
         on_retry: RetryCallback | None = None,
     ) -> AnalysisResult:
-        existing_keys = {k.lower() for k in existing}
         batches = self._batcher.batch(windows)
         if self._config.max_iterations > 0:
             batches = batches[: self._config.max_iterations]
+        if self._config.concurrency > 1 and len(batches) > 1:
+            return self._analyze_parallel(batches, windows, existing, on_progress, on_retry)
+        return self._analyze_sequential(batches, windows, existing, on_progress, on_retry)
 
+    def _analyze_sequential(
+        self,
+        batches: Sequence[Sequence[ContextWindow]],
+        windows: Sequence[ContextWindow],
+        existing: dict[str, str],
+        on_progress: ProgressCallback | None,
+        on_retry: RetryCallback | None,
+    ) -> AnalysisResult:
         threshold = _confidence_rank(self._config.min_confidence)
-        seen: set[str] = set(existing_keys)
+        seen: set[str] = {k.lower() for k in existing}
         accepted: list[ReplacementSuggestion] = []
         processed: list[ContextWindow] = []
 
@@ -795,6 +884,129 @@ class ReplacementAnalyzer:
             position=start_offset + len(processed),
             full_total=self._full_total,
             interrupted=interrupted,
+        )
+
+    def _analyze_parallel(
+        self,
+        batches: Sequence[Sequence[ContextWindow]],
+        windows: Sequence[ContextWindow],
+        existing: dict[str, str],
+        on_progress: ProgressCallback | None,
+        on_retry: RetryCallback | None,
+    ) -> AnalysisResult:
+        """Run up to ``concurrency`` batch requests at once.
+
+        The saved checkpoint must never skip a batch, so the reported ``position``
+        advances only over the CONTIGUOUS completed prefix of batches: if batch 3 is
+        still running while 4 and 5 finish, the position sits at the end of batch 2.
+        On restart 4 and 5 are reprocessed (dedup drops the duplicates) — no gaps.
+        """
+        threshold = _confidence_rank(self._config.min_confidence)
+        state = _ParallelState({k.lower() for k in existing})
+        window_counts = [len(b) for b in batches]
+        total = len(batches)
+        start_offset = self._applied_offset
+
+        def work(index: int, batch: Sequence[ContextWindow]) -> None:
+            known = state.snapshot_seen() if self._config.send_known else set()
+            raw = self._suggest_with_retry(batch, known, index, total, on_retry)
+            # dedup + accept mutate shared `seen`/`accepted`: do it under the lock.
+            with state.lock:
+                fresh = self._accept_new(raw, threshold, state.seen)
+                state.accepted.extend(fresh)
+                state.uncommitted.extend(fresh)
+                state.done.add(index)
+
+        pool = _DaemonPoolExecutor(max_workers=self._config.concurrency)
+        pending: dict[Future[None], int] = {}
+        next_index = 1
+        stopping = False
+        try:
+            # Prime the pool, then top it up as each batch completes.
+            for index, batch in enumerate(batches, start=1):
+                pending[pool.submit(work, index, batch)] = index
+                if len(pending) >= self._config.concurrency:
+                    next_index = index + 1
+                    break
+            else:
+                next_index = total + 1
+
+            while pending:
+                done, _ = wait(pending, return_when=FIRST_COMPLETED)
+                for fut in done:
+                    idx = pending.pop(fut)
+                    exc = fut.exception()
+                    if isinstance(exc, KeyboardInterrupt):
+                        stopping = True  # Ctrl+C landed inside a worker
+                    elif exc is not None:
+                        # This batch failed after all retries: freeze the committed
+                        # prefix before it so its window range is retried next run.
+                        state.mark_failed(idx)
+                self._emit_prefix_progress(
+                    state, window_counts, total, start_offset, on_progress
+                )
+                if stopping:
+                    break
+                # Refill up to the concurrency limit, unless a batch has failed
+                # (then drain what's in flight and stop submitting new work).
+                while (
+                    not state.failed
+                    and next_index <= total
+                    and len(pending) < self._config.concurrency
+                ):
+                    if self._config.delay > 0:
+                        time.sleep(self._config.delay)
+                    pending[pool.submit(work, next_index, batches[next_index - 1])] = next_index
+                    next_index += 1
+        except KeyboardInterrupt:
+            # Ctrl+C: stop submitting new work and don't block on the in-flight
+            # requests. cancel_futures drops queued batches; running ones are
+            # abandoned. The committed prefix so far is still returned, so the next
+            # run resumes from there — nothing already-done is lost.
+            stopping = True
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
+
+        prefix = state.advance_prefix()
+        processed = sum(window_counts[:prefix])
+        return AnalysisResult(
+            suggestions=state.accepted,
+            processed=processed,
+            total=len(windows),
+            position=start_offset + processed,
+            full_total=self._full_total,
+            interrupted=stopping or state.failed is not None,
+            aborted_by_user=stopping,
+        )
+
+    def _emit_prefix_progress(
+        self,
+        state: _ParallelState,
+        window_counts: Sequence[int],
+        total: int,
+        start_offset: int,
+        on_progress: ProgressCallback | None,
+    ) -> None:
+        """Report progress after a batch finishes.
+
+        ``batch_index`` is how many batches have COMPLETED (monotonic, for the user),
+        while ``position`` tracks the contiguous completed prefix (crash-safe checkpoint):
+        the two differ under concurrency when batches finish out of order.
+        """
+        if on_progress is None:
+            return
+        prefix = state.advance_prefix()
+        processed = sum(window_counts[:prefix])
+        on_progress(
+            BatchProgress(
+                batch_index=state.completed_count(),
+                batch_total=total,
+                windows_done=processed,
+                suggestions_so_far=len(state.accepted),
+                new_suggestions=state.drain_uncommitted(),
+                position=start_offset + processed,
+                full_total=self._full_total,
+            )
         )
 
     def _suggest_with_retry(

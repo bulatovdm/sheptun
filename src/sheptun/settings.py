@@ -161,6 +161,10 @@ class Settings:
     # Off by default: with 1000+ rules that block is ~4-5k tokens per request; dedup against
     # existing rules still runs before writing, so dropping it costs no correctness, only tokens.
     analyzer_send_known: bool = _get_bool("SHEPTUN_ANALYZER_SEND_KNOWN", False)
+    # How many batch requests to run in parallel. 1 = sequential. The proxy handles ~5 concurrent
+    # requests without latency degradation (measured); above ~8 the tail latency grows. The saved
+    # checkpoint advances only over the contiguous completed prefix, so a crash never skips a batch.
+    analyzer_concurrency: int = int(_get_float("SHEPTUN_ANALYZER_CONCURRENCY", 5))
     # SDK-level retries per request — 0 = fail fast; our own backoff loop handles retries instead.
     analyzer_max_retries: int = int(_get_float("SHEPTUN_ANALYZER_MAX_RETRIES", 0))
     # Pause (seconds) between successful model requests — eases load on the proxy/origin (502s).

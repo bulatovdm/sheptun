@@ -1,3 +1,4 @@
+import time
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -285,7 +286,7 @@ class TestIterationLimitAndCheckpoint:
 class TestProgress:
     def test_callback_fires_per_batch_with_fresh_only(self, log_path: Path) -> None:
         client = _FakeClient([ReplacementSuggestion("комит", "коммит", "high", "", 2)])
-        config = AnalyzerConfig(context_lines=1, min_freq=1, batch_size=1)
+        config = AnalyzerConfig(context_lines=1, min_freq=1, batch_size=1, concurrency=1)
         analyzer = ReplacementAnalyzer(config, client=client)
         windows = analyzer.prepare_windows(log_path)
 
@@ -361,7 +362,9 @@ class TestCheckpointOnInterrupt:
 
     def test_progress_exposes_running_position(self, log_path: Path) -> None:
         client = _FakeClient([])
-        config = AnalyzerConfig(context_lines=1, min_freq=1, batch_size=1, max_iterations=10)
+        config = AnalyzerConfig(
+            context_lines=1, min_freq=1, batch_size=1, max_iterations=10, concurrency=1
+        )
         analyzer = ReplacementAnalyzer(config, client=client)
         windows = analyzer.prepare_windows(log_path)
 
@@ -375,7 +378,9 @@ class TestCheckpointOnInterrupt:
 
     def test_position_saved_before_interrupt(self, log_path: Path) -> None:
         client = _FailingClient(fail_on=2)  # 1 batch ok, 2nd raises
-        config = AnalyzerConfig(context_lines=1, min_freq=1, batch_size=1, max_iterations=10)
+        config = AnalyzerConfig(
+            context_lines=1, min_freq=1, batch_size=1, max_iterations=10, concurrency=1
+        )
         analyzer = ReplacementAnalyzer(config, client=client)
         windows = analyzer.prepare_windows(log_path)
 
@@ -435,6 +440,7 @@ class TestCheckpointOnRequestError:
             delay=0,
             retry_backoff=0,
             max_error_retries=0,
+            concurrency=1,  # these assert the strict sequential interrupt/position path
         )
         return config, log
 
@@ -740,6 +746,8 @@ class TestStreamingToggle:
         c = AnthropicClient.__new__(AnthropicClient)
         c._model = "m"  # type: ignore[attr-defined]
         c._effort = "medium"  # type: ignore[attr-defined]
+        c._thinking = False  # type: ignore[attr-defined]
+        c._max_tokens = 8000  # type: ignore[attr-defined]
         c._stream = stream  # type: ignore[attr-defined]
         c._on_stream_progress = None  # type: ignore[attr-defined]
         c._stream_started = 0.0  # type: ignore[attr-defined]
@@ -909,3 +917,84 @@ class TestSuggestionWriter:
         assert "\x08" not in s.old
         assert "\x08" not in s.new
         assert "\x08" not in s.reason
+
+
+class _OrderedClient:
+    """Deterministic parallel client: batches whose target is in ``slow`` sleep so they
+    finish out of order; targets in ``fail`` raise. One unique rule per batch."""
+
+    def __init__(self, slow: set[str] | None = None, fail: set[str] | None = None) -> None:
+        self._slow = slow or set()
+        self._fail = fail or set()
+
+    def suggest(
+        self, batch: Sequence[ContextWindow], known: set[str] | None = None  # noqa: ARG002
+    ) -> list[ReplacementSuggestion]:
+        target = batch[0].target
+        if target in self._slow:
+            time.sleep(0.4)  # completes after later batches
+        if target in self._fail:
+            raise RuntimeError(f"boom {target}")
+        return [ReplacementSuggestion(target, target.upper(), "high", "", 1)]
+
+    def set_phrase_index(self, index: PhraseIndex) -> None:
+        del index
+
+
+class TestParallelCheckpoint:
+    """The parallel path advances the saved position only over the contiguous completed
+    prefix of batches, so a crash or interrupt never skips an unfinished batch."""
+
+    def _windows(self, n: int) -> list[ContextWindow]:
+        return [ContextWindow(target=f"w{i}", before=(), after=()) for i in range(n)]
+
+    def _config(self, **kw: object) -> AnalyzerConfig:
+        base: dict[str, object] = {
+            "batch_size": 1, "concurrency": 5, "delay": 0.0, "verify": False,
+            "min_confidence": "low", "retry_backoff": 0.0, "max_error_retries": 0,
+        }
+        base.update(kw)
+        return AnalyzerConfig(**base)  # type: ignore[arg-type]
+
+    def test_out_of_order_completion_keeps_prefix_monotonic(self) -> None:
+        # Batch 1 is slowest: the position must not jump ahead while it is still running.
+        analyzer = ReplacementAnalyzer(self._config(), client=_OrderedClient(slow={"w0"}))
+        analyzer._full_total = 10
+        positions: list[int] = []
+        result = analyzer.analyze_windows(
+            self._windows(10), existing={}, on_progress=lambda p: positions.append(p.position)
+        )
+        assert result.position == 10
+        assert len(result.suggestions) == 10
+        assert result.interrupted is False
+        assert positions == sorted(positions)  # prefix never rolls back
+
+    def test_failed_batch_freezes_position_before_it(self) -> None:
+        # Batch 3 (w2) fails: the committed prefix must stop at 2, not skip the gap.
+        analyzer = ReplacementAnalyzer(self._config(), client=_OrderedClient(fail={"w2"}))
+        analyzer._full_total = 10
+        result = analyzer.analyze_windows(self._windows(10), existing={})
+        assert result.position == 2
+        assert result.interrupted is True
+        assert result.aborted_by_user is False  # a proxy error, not Ctrl+C — no force-exit
+
+    def test_keyboard_interrupt_stops_without_raising(self) -> None:
+        # Ctrl+C in the main loop: the method must swallow KeyboardInterrupt, return
+        # interrupted=True with the committed prefix, and not block or re-raise.
+        analyzer = ReplacementAnalyzer(self._config(concurrency=2), client=_OrderedClient())
+        analyzer._full_total = 10
+
+        calls = {"n": 0}
+        real_emit = analyzer._emit_prefix_progress
+
+        def emit_then_interrupt(*args: object, **kw: object) -> None:
+            real_emit(*args, **kw)  # type: ignore[arg-type]
+            calls["n"] += 1
+            if calls["n"] >= 1:
+                raise KeyboardInterrupt  # simulate Ctrl+C arriving in the main thread
+
+        analyzer._emit_prefix_progress = emit_then_interrupt  # type: ignore[method-assign]
+        result = analyzer.analyze_windows(self._windows(10), existing={})
+        assert result.interrupted is True
+        assert result.aborted_by_user is True  # flags Ctrl+C so the CLI force-exits
+        assert result.position <= 10  # returned a valid prefix, did not hang or raise
