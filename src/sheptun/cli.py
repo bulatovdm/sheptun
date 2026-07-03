@@ -251,6 +251,21 @@ def analyze_replacements(
         int | None,
         typer.Option("--batch-size", help="Сколько окон отправлять в одном запросе"),
     ] = None,
+    concurrency: Annotated[
+        int | None,
+        typer.Option("--concurrency", help="Сколько запросов слать параллельно (1 = последовательно)"),
+    ] = None,
+    max_tokens: Annotated[
+        int | None,
+        typer.Option("--max-tokens", help="Потолок токенов ответа на запрос"),
+    ] = None,
+    thinking: Annotated[
+        bool | None,
+        typer.Option(
+            "--thinking/--no-thinking",
+            help="Extended thinking модели (по умолчанию выкл: короче и быстрее)",
+        ),
+    ] = None,
     max_windows: Annotated[
         int | None,
         typer.Option("--max-windows", help="Лимит окон (0 = без лимита)"),
@@ -394,6 +409,12 @@ def analyze_replacements(
         analyzer_config.context_lines = context
     if batch_size is not None:
         analyzer_config.batch_size = batch_size
+    if concurrency is not None:
+        analyzer_config.concurrency = concurrency
+    if max_tokens is not None:
+        analyzer_config.max_tokens = max_tokens
+    if thinking is not None:
+        analyzer_config.thinking = thinking
     if max_windows is not None:
         analyzer_config.max_windows = max_windows
     if min_freq is not None:
@@ -448,7 +469,8 @@ def analyze_replacements(
     _info(
         f"Окон к анализу: {len(windows)} из {analyzer.full_total} "
         f"(с позиции {analyzer.applied_offset}{range_hint}), "
-        f"модель: {analyzer_config.model}, батч: {analyzer_config.batch_size}"
+        f"модель: {analyzer_config.model}, батч: {analyzer_config.batch_size}, "
+        f"параллельно: {analyzer_config.concurrency}"
     )
 
     writer = SuggestionWriter()

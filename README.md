@@ -298,6 +298,9 @@ sheptun analyze-replacements --min-confidence high
 # Порциями — по 5 запросов к модели за прогон (ограничивает стоимость/время)
 sheptun analyze-replacements --max-iterations 5 --batch-size 8 --min-confidence high
 
+# Параллельно (быстрее); --concurrency 1 — строго последовательно
+sheptun analyze-replacements --concurrency 5 --apply
+
 # За конкретный период (перематывает чекпоинт на дату и продолжает с неё)
 sheptun analyze-replacements --since 2026-06-01 --until 2026-06-30
 
@@ -321,13 +324,13 @@ sheptun analyze-replacements --reset-state
 |------|-----|-----------|
 | `--context N` | `CONTEXT_LINES` | Строк контекста ±N вокруг каждой строки (10) |
 | `--batch-size N` | `BATCH_SIZE` | Окон в одном запросе к модели (8) |
-| — | `CONCURRENCY` | Батчей параллельно (5; 1 = последовательно) |
-| — | `MAX_TOKENS` | Потолок вывода на запрос — запас против обрыва JSON (12000) |
+| `--concurrency N` | `CONCURRENCY` | Батчей параллельно (5; 1 = последовательно) |
+| `--max-tokens N` | `MAX_TOKENS` | Потолок вывода на запрос — запас против обрыва JSON (12000) |
 | `--max-iterations N` | `MAX_ITERATIONS` | Лимит запросов к модели за прогон (0 = без лимита) |
 | `--min-freq N` | `MIN_FREQ` | Минимальная частота строки для анализа (1) |
 | `--min-confidence` | `MIN_CONFIDENCE` | Отсекать кандидатов ниже уровня — low/medium/high (medium) |
 | `--model` | `MODEL` | Модель Anthropic (claude-opus-4-8) |
-| — | `THINKING` | Extended thinking модели (выкл.; вкл. = медленнее, упор в потолок) |
+| `--thinking/--no-thinking` | `THINKING` | Extended thinking модели (выкл.; вкл. = медленнее, упор в потолок) |
 | — | `EFFORT` | Глубина рассуждений — low…max (medium; действует только при `THINKING`) |
 | `--stream/--no-stream` | `STREAM` | Стриминг ответа (SSE) против таймаута прокси (вкл.) |
 | `--send-known/--no-send-known` | `SEND_KNOWN` | Слать известные правила в промпт (выкл.) |
