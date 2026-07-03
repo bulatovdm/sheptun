@@ -142,3 +142,13 @@ LLM pipeline behind `sheptun analyze-replacements` — decomposed by SRP, each s
 ## Git Commits
 
 Do not add Co-Authored-By or emoji badges to commit messages.
+
+<!-- kb-memory:start -->
+## Память проекта (.kb/memory)
+
+ОБЯЗАТЕЛЬНО в начале сессии: прочитай индекс `.kb/memory/memory.md` — оглавление долговременной
+памяти проекта (темы + краткие хуки). Сами тематические файлы НЕ читай сразу — подгружай конкретную
+тему из индекса только когда она нужна по текущей задаче.
+
+Зафиксировать новое воспоминание — скилл `/kb-remember`.
+<!-- kb-memory:end -->
