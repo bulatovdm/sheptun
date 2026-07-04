@@ -7,3 +7,4 @@
 
 - [Деплой и перезапуск](deploy.md) — правки Python-кода: хватает `sheptun restart`, пересборка `.app` не нужна
 - [Вставка текста](text-insertion.md) — метод по умолчанию clipboard/Cmd+V, ConcealedType против CopyClip, снапшот всех типов буфера, trailing-пробел
+- [LLM Enhancement](llm-enhancement.md) — локальное причёсывание транскрипта (VoiceInk-стиль): reasoning off, галлюцинация терминов, LM Studio vs macOS 13.7, наш Whisper на MLX/GPU
