@@ -178,6 +178,10 @@ class Settings:
     analyzer_max_error_retries: int = int(_get_float("SHEPTUN_ANALYZER_MAX_ERROR_RETRIES", 4))
     # Override User-Agent — some proxies block the default Anthropic SDK UA (empty = SDK default)
     analyzer_user_agent: str | None = _get_optional_str("SHEPTUN_ANALYZER_USER_AGENT")
+    # Log each request's user prompt and the model's raw reply (DEBUG level) so a malformed
+    # or unparsable answer is visible in the log. Off by default — the prompts are large and
+    # would bloat the log across thousands of requests. Turn on to debug parsing/empty replies.
+    analyzer_log_prompts: bool = _get_bool("SHEPTUN_ANALYZER_LOG_PROMPTS", False)
 
 
 settings = Settings()

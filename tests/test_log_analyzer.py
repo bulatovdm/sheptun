@@ -647,6 +647,31 @@ class TestResponseParsing:
     def test_invalid_returns_empty(self) -> None:
         assert _extract_items("совсем не json") == []
 
+    def test_objects_without_outer_brackets(self) -> None:
+        # The model routinely omits the surrounding [ ] and streams objects
+        # comma-separated; each complete object must still be recovered.
+        text = ' {"old": "комит", "new": "коммит"},\n {"old": "удоли", "new": "Удали"}'
+        items = _extract_items(text)
+        assert [i["old"] for i in items] == ["комит", "удоли"]
+
+    def test_truncated_reply_keeps_complete_objects(self) -> None:
+        # Cut off mid-object on max_tokens: the two whole objects survive, the
+        # dangling third is dropped — instead of losing the entire batch.
+        text = (
+            ' {"old": "комит", "new": "коммит", "confidence": "high", "reason": "x"},\n'
+            ' {"old": "удоли", "new": "Удали", "confidence": "high", "reason": "y"},\n'
+            ' {"old": "симфоне", "new": "Symfony", "confidence": "medium", "reason": "вари'
+        )
+        items = _extract_items(text)
+        assert [i["old"] for i in items] == ["комит", "удоли"]
+
+    def test_scrape_fallback_not_used_when_json_valid(self) -> None:
+        # A proper array with a reason containing a comma must parse as one array,
+        # not be re-scraped — the happy path is unchanged.
+        text = '[{"old": "комит", "new": "коммит", "reason": "git, часто"}]'
+        items = _extract_items(text)
+        assert items == [{"old": "комит", "new": "коммит", "reason": "git, часто"}]
+
     def test_normalize_accepts_find_replace_keys(self) -> None:
         suggestion = _normalize_item({"find": "\\bкомит\\b", "replace": "коммит"}, frequency=3)
         assert suggestion is not None
@@ -705,43 +730,77 @@ class _FakeResponse:
         self.usage = type("Usage", (), {"output_tokens": output_tokens})()
 
 
-class _FakeStream:
-    """Context manager mimicking client.messages.stream(...)."""
+def _event(type_: str, **attrs: object) -> object:
+    """A duck-typed SSE event object with arbitrary attributes."""
+    return type("Event", (), {"type": type_, **attrs})()
 
-    def __init__(self, text: str, chunks: list[str] | None = None) -> None:
-        self._text = text
-        self.text_stream = iter(chunks or [text])
 
-    def __enter__(self) -> "_FakeStream":
+def _text_start(index: int) -> object:
+    block = type("Block", (), {"type": "text"})()
+    return _event("content_block_start", index=index, content_block=block)
+
+
+def _text_delta(index: int, text: str) -> object:
+    delta = type("Delta", (), {"type": "text_delta", "text": text})()
+    return _event("content_block_delta", index=index, delta=delta)
+
+
+def _msg_start(input_tokens: int = 0, cache_read: int = 0) -> object:
+    usage = type(
+        "Usage",
+        (),
+        {
+            "input_tokens": input_tokens,
+            "output_tokens": 0,
+            "cache_read_input_tokens": cache_read,
+            "cache_creation_input_tokens": 0,
+        },
+    )()
+    message = type("Message", (), {"usage": usage})()
+    return _event("message_start", message=message)
+
+
+def _msg_delta(output_tokens: int, stop_reason: str = "end_turn") -> object:
+    usage = type("Usage", (), {"output_tokens": output_tokens})()
+    delta = type("Delta", (), {"stop_reason": stop_reason})()
+    return _event("message_delta", usage=usage, delta=delta)
+
+
+class _FakeEventStream:
+    """Context manager mimicking client.messages.create(stream=True) — a raw event iterator."""
+
+    def __init__(self, events: list[object]) -> None:
+        self._events = events
+
+    def __enter__(self) -> "_FakeEventStream":
         return self
 
     def __exit__(self, *_exc: object) -> None:
         return None
 
-    def get_final_message(self) -> _FakeResponse:
-        return _FakeResponse(self._text, output_tokens=99)
+    def __iter__(self):  # type: ignore[no-untyped-def]
+        return iter(self._events)
 
 
 class _FakeMessages:
-    def __init__(self, chunks: list[str] | None = None) -> None:
-        self.create_calls = 0
+    def __init__(self, events: list[object] | None = None) -> None:
+        self.blocking_calls = 0
         self.stream_calls = 0
-        self._chunks = chunks
+        self._events = events or []
 
-    def create(self, **_kwargs: object) -> _FakeResponse:
-        self.create_calls += 1
+    def create(self, **kwargs: object) -> object:
+        if kwargs.get("stream"):
+            self.stream_calls += 1
+            return _FakeEventStream(self._events)
+        self.blocking_calls += 1
         return _FakeResponse("streamed=no")
 
-    def stream(self, **_kwargs: object) -> _FakeStream:
-        self.stream_calls += 1
-        return _FakeStream("streamed=yes", chunks=self._chunks)
 
-
-class TestStreamingToggle:
-    """The stream flag picks the transport (messages.stream vs .create); same result."""
+class TestStreamingTransport:
+    """The stream flag picks the transport; both yield the same text from the response."""
 
     def _client(
-        self, stream: bool, chunks: list[str] | None = None
+        self, stream: bool, events: list[object] | None = None
     ) -> tuple["AnthropicClient", _FakeMessages]:
         c = AnthropicClient.__new__(AnthropicClient)
         c._model = "m"  # type: ignore[attr-defined]
@@ -751,29 +810,244 @@ class TestStreamingToggle:
         c._stream = stream  # type: ignore[attr-defined]
         c._on_stream_progress = None  # type: ignore[attr-defined]
         c._stream_started = 0.0  # type: ignore[attr-defined]
-        messages = _FakeMessages(chunks=chunks)
+        messages = _FakeMessages(events=events)
         c._client = type("Client", (), {"messages": messages})()  # type: ignore[attr-defined]
         return c, messages
 
-    def test_stream_progress_fires_with_final_token_count(self) -> None:
-        # Many small chunks over >1s of wall clock so the throttled tick fires at least once,
-        # plus the final exact-usage tick (99 tokens) after get_final_message().
-        client, _ = self._client(stream=True, chunks=["x"] * 5)
+    def test_blocking_path_uses_blocking_create(self) -> None:
+        client, messages = self._client(stream=False)
+        assert client._ask("sys", "user") == "streamed=no"
+        assert (messages.blocking_calls, messages.stream_calls) == (1, 0)
+
+    def test_streaming_path_uses_streaming_create(self) -> None:
+        events = [_msg_start(), _text_start(0), _text_delta(0, "hi"), _msg_delta(5)]
+        client, messages = self._client(stream=True, events=events)
+        assert client._ask("sys", "user") == "hi"
+        assert (messages.blocking_calls, messages.stream_calls) == (0, 1)
+
+    def test_progress_fires_with_final_token_count(self) -> None:
+        events = [_msg_start(), _text_start(0), _text_delta(0, "hello"), _msg_delta(42)]
+        client, _ = self._client(stream=True, events=events)
         ticks: list[tuple[int, float]] = []
         client.set_stream_progress(lambda tokens, seconds: ticks.append((tokens, seconds)))
         client._ask("sys", "user")
         assert ticks, "expected at least the final progress tick"
-        assert ticks[-1][0] == 99  # last tick carries the exact token count from usage
+        assert ticks[-1][0] == 42  # last tick carries the exact token count from usage
 
-    def test_blocking_path_uses_create(self) -> None:
-        client, messages = self._client(stream=False)
-        assert client._ask("sys", "user") == "streamed=no"
-        assert (messages.create_calls, messages.stream_calls) == (1, 0)
 
-    def test_streaming_path_uses_stream(self) -> None:
-        client, messages = self._client(stream=True)
-        assert client._ask("sys", "user") == "streamed=yes"
-        assert (messages.create_calls, messages.stream_calls) == (0, 1)
+class TestStreamNonContiguousIndices:
+    """Regression: the proxy emits content blocks with skipped indices (0, then 2).
+
+    The SDK's own stream accumulator indexes its snapshot by ``event.index`` and grows
+    it one entry per content_block_start, so a delta for block 2 (with only 1 block
+    started) raised ``IndexError: list index out of range`` and killed every request.
+    Our raw-event consumer must be index-agnostic.
+    """
+
+    def _client(self, events: list[object]) -> "AnthropicClient":
+        c = AnthropicClient.__new__(AnthropicClient)
+        c._model = "m"  # type: ignore[attr-defined]
+        c._effort = "medium"  # type: ignore[attr-defined]
+        c._thinking = False  # type: ignore[attr-defined]
+        c._max_tokens = 8000  # type: ignore[attr-defined]
+        c._stream = True  # type: ignore[attr-defined]
+        c._on_stream_progress = None  # type: ignore[attr-defined]
+        c._stream_started = 0.0  # type: ignore[attr-defined]
+        messages = _FakeMessages(events=events)
+        c._client = type("Client", (), {"messages": messages})()  # type: ignore[attr-defined]
+        return c
+
+    def test_skipped_index_does_not_crash_and_text_concatenated(self) -> None:
+        # Block 0 then block 2 — index 1 skipped, exactly the shape that crashed the SDK.
+        events = [
+            _msg_start(),
+            _text_start(0),
+            _text_delta(0, "["),
+            _event("content_block_stop", index=0),
+            _text_start(2),
+            _text_delta(2, '{"old":"комит",'),
+            _text_delta(2, '"new":"коммит"}'),
+            _text_delta(2, "]"),
+            _event("content_block_stop", index=2),
+            _msg_delta(11),
+        ]
+        client = self._client(events)
+        result = client._ask("sys", "user")
+        assert result == '[{"old":"комит","new":"коммит"}]'
+
+    def test_delta_before_any_start_is_tolerated(self) -> None:
+        # A delta with no preceding content_block_start at all — still index-agnostic.
+        events = [_msg_start(), _text_delta(0, "hi"), _msg_delta(3)]
+        client = self._client(events)
+        assert client._ask("sys", "user") == "hi"
+
+    def test_usage_and_stop_reason_assembled_from_events(self) -> None:
+        events = [
+            _msg_start(input_tokens=100, cache_read=80),
+            _text_start(0),
+            _text_delta(0, "x"),
+            _msg_delta(7, stop_reason="end_turn"),
+        ]
+        client = self._client(events)
+        response = client._ask_streaming({})
+        assert response.usage.input_tokens == 100
+        assert response.usage.cache_read_input_tokens == 80
+        assert response.usage.output_tokens == 7
+        assert response.stop_reason == "end_turn"
+
+
+class TestEmptyMaxTokensRetry:
+    """An empty reply stopped on max_tokens is a stalled generation -> raise to retry.
+
+    Under load the proxy occasionally returns out=0/stop=max_tokens after a long stall.
+    Left as an empty result it would silently zero the batch and advance the checkpoint
+    past it; raising routes it through _suggest_with_retry's backoff instead.
+    """
+
+    def _client(self, events: list[object]) -> "AnthropicClient":
+        c = AnthropicClient.__new__(AnthropicClient)
+        c._model = "m"  # type: ignore[attr-defined]
+        c._effort = "medium"  # type: ignore[attr-defined]
+        c._thinking = False  # type: ignore[attr-defined]
+        c._max_tokens = 8000  # type: ignore[attr-defined]
+        c._stream = True  # type: ignore[attr-defined]
+        c._on_stream_progress = None  # type: ignore[attr-defined]
+        c._stream_started = 0.0  # type: ignore[attr-defined]
+        messages = _FakeMessages(events=events)
+        c._client = type("Client", (), {"messages": messages})()  # type: ignore[attr-defined]
+        return c
+
+    def test_empty_max_tokens_raises(self) -> None:
+        # out=0, stop=max_tokens, no text deltas — the exact shape seen in analyzer.log.
+        events = [_msg_start(), _msg_delta(0, stop_reason="max_tokens")]
+        client = self._client(events)
+        with pytest.raises(RuntimeError, match="max_tokens"):
+            client._ask("sys", "user")
+
+    def test_nonempty_max_tokens_is_kept(self) -> None:
+        # A truncated-but-non-empty reply is usable: parse the JSON as far as it goes.
+        events = [
+            _msg_start(),
+            _text_start(0),
+            _text_delta(0, '[{"old":"комит","new":"коммит"}]'),
+            _msg_delta(16, stop_reason="max_tokens"),
+        ]
+        client = self._client(events)
+        assert client._ask("sys", "user") == '[{"old":"комит","new":"коммит"}]'
+
+    def test_empty_end_turn_is_valid_zero_result(self) -> None:
+        # Empty + end_turn = the model genuinely found nothing. Not an error.
+        events = [_msg_start(), _msg_delta(1, stop_reason="end_turn")]
+        client = self._client(events)
+        assert client._ask("sys", "user") == ""
+
+    def test_retry_recovers_the_stalled_batch(self) -> None:
+        # End-to-end: a stalled empty reply is retried, the retry lands suggestions.
+        stalled = [_msg_start(), _msg_delta(0, stop_reason="max_tokens")]
+        healthy = [
+            _msg_start(),
+            _text_start(0),
+            _text_delta(0, '[{"old":"комит","new":"коммит","confidence":"high","reason":""}]'),
+            _msg_delta(16, stop_reason="end_turn"),
+        ]
+        c = AnthropicClient.__new__(AnthropicClient)
+        c._model = "m"  # type: ignore[attr-defined]
+        c._effort = "medium"  # type: ignore[attr-defined]
+        c._thinking = False  # type: ignore[attr-defined]
+        c._max_tokens = 8000  # type: ignore[attr-defined]
+        c._stream = True  # type: ignore[attr-defined]
+        c._verify = False  # type: ignore[attr-defined]
+        c._phrase_index = None  # type: ignore[attr-defined]
+        c._on_stream_progress = None  # type: ignore[attr-defined]
+        c._stream_started = 0.0  # type: ignore[attr-defined]
+        replies = iter([_FakeEventStream(stalled), _FakeEventStream(healthy)])
+        messages = type("M", (), {"create": lambda _self, **_kw: next(replies)})()
+        c._client = type("Client", (), {"messages": messages})()  # type: ignore[attr-defined]
+
+        analyzer = ReplacementAnalyzer.__new__(ReplacementAnalyzer)
+        analyzer._client = c  # type: ignore[attr-defined]
+        analyzer._config = AnalyzerConfig(  # type: ignore[attr-defined]
+            send_known=False, retry_backoff=0, max_error_retries=2
+        )
+        batch = [ContextWindow(target="сделай комит", before=(), after=(), frequency=3)]
+        result = analyzer._suggest_with_retry(batch, seen=set(), index=1, total=1, on_retry=None)
+        assert [s.old for s in result] == ["комит"]  # first stalled, retry recovered it
+
+
+def _patch_log_prompts(monkeypatch, value: bool) -> None:
+    """Swap the module-level ``settings`` for a copy with the flag set.
+
+    ``settings`` is a frozen dataclass, so its fields can't be assigned; we rebind the
+    whole object in the log_analyzer namespace instead (a plain module attribute).
+    """
+    import dataclasses
+
+    from sheptun.log_analyzer import settings as current
+
+    monkeypatch.setattr(
+        "sheptun.log_analyzer.settings",
+        dataclasses.replace(current, analyzer_log_prompts=value),
+    )
+
+
+class TestRequestLogging:
+    """Prompt/reply logging is gated behind a flag; the unparsable-reply warning is always on."""
+
+    def _client(self, reply: str) -> "AnthropicClient":
+        c = AnthropicClient.__new__(AnthropicClient)
+        c._model = "m"  # type: ignore[attr-defined]
+        c._effort = "medium"  # type: ignore[attr-defined]
+        c._thinking = False  # type: ignore[attr-defined]
+        c._max_tokens = 8000  # type: ignore[attr-defined]
+        c._stream = True  # type: ignore[attr-defined]
+        c._verify = False  # type: ignore[attr-defined]
+        c._phrase_index = None  # type: ignore[attr-defined]
+        events = [
+            _msg_start(),
+            _text_start(0),
+            _text_delta(0, reply),
+            _msg_delta(len(reply), stop_reason="end_turn"),
+        ]
+        messages = _FakeMessages(events=events)
+        c._client = type("Client", (), {"messages": messages})()  # type: ignore[attr-defined]
+        c._on_stream_progress = None  # type: ignore[attr-defined]
+        c._stream_started = 0.0  # type: ignore[attr-defined]
+        return c
+
+    def test_flag_off_does_not_log_prompt_or_reply(self, monkeypatch, caplog) -> None:
+        _patch_log_prompts(monkeypatch, False)
+        client = self._client('[{"old":"a","new":"b"}]')
+        with caplog.at_level("DEBUG", logger="sheptun.analyzer"):
+            client._ask("SYSTEM-PROMPT-TEXT", "USER-PROMPT-TEXT")
+        assert "USER-PROMPT-TEXT" not in caplog.text
+        assert "Сырой ответ" not in caplog.text
+
+    def test_flag_on_logs_user_prompt_and_raw_reply(self, monkeypatch, caplog) -> None:
+        _patch_log_prompts(monkeypatch, True)
+        client = self._client('[{"old":"a","new":"b"}]')
+        with caplog.at_level("DEBUG", logger="sheptun.analyzer"):
+            client._ask("SYSTEM-PROMPT-TEXT", "USER-PROMPT-TEXT")
+        assert "USER-PROMPT-TEXT" in caplog.text  # user prompt logged
+        assert '[{"old":"a","new":"b"}]' in caplog.text  # raw reply logged
+        assert "SYSTEM-PROMPT-TEXT" not in caplog.text  # system is static, never logged
+
+    def test_unparsable_nonempty_reply_warns_without_flag(self, monkeypatch, caplog) -> None:
+        _patch_log_prompts(monkeypatch, False)
+        client = self._client("тут точно нет никакого json")
+        batch = [ContextWindow(target="строка", before=(), after=(), frequency=1)]
+        with caplog.at_level("WARNING", logger="sheptun.analyzer"):
+            result = client.suggest(batch)
+        assert result == []
+        assert "не распарсился" in caplog.text  # visible even with logging flag off
+
+    def test_empty_reply_does_not_warn(self, monkeypatch, caplog) -> None:
+        # An empty end_turn reply is a legit zero result, not a parse failure — no warning.
+        _patch_log_prompts(monkeypatch, False)
+        client = self._client("")
+        batch = [ContextWindow(target="строка", before=(), after=(), frequency=1)]
+        with caplog.at_level("WARNING", logger="sheptun.analyzer"):
+            client.suggest(batch)
+        assert "не распарсился" not in caplog.text
 
 
 class TestPhraseIndex:
@@ -928,7 +1202,9 @@ class _OrderedClient:
         self._fail = fail or set()
 
     def suggest(
-        self, batch: Sequence[ContextWindow], known: set[str] | None = None  # noqa: ARG002
+        self,
+        batch: Sequence[ContextWindow],
+        known: set[str] | None = None,  # noqa: ARG002
     ) -> list[ReplacementSuggestion]:
         target = batch[0].target
         if target in self._slow:
@@ -950,8 +1226,13 @@ class TestParallelCheckpoint:
 
     def _config(self, **kw: object) -> AnalyzerConfig:
         base: dict[str, object] = {
-            "batch_size": 1, "concurrency": 5, "delay": 0.0, "verify": False,
-            "min_confidence": "low", "retry_backoff": 0.0, "max_error_retries": 0,
+            "batch_size": 1,
+            "concurrency": 5,
+            "delay": 0.0,
+            "verify": False,
+            "min_confidence": "low",
+            "retry_backoff": 0.0,
+            "max_error_retries": 0,
         }
         base.update(kw)
         return AnalyzerConfig(**base)  # type: ignore[arg-type]

@@ -51,6 +51,11 @@ _DATE_TIME = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$")
 _STREAM_TICK_SECONDS = 1.0
 _CHARS_PER_TOKEN = 4
 
+# An empty reply that stopped on this reason is a truncated/stalled generation (the
+# proxy occasionally returns out=0/stop=max_tokens under load), NOT the model saying
+# "nothing to replace". Raised so `_suggest_with_retry` retries it with backoff.
+_MAX_TOKENS_STOP = "max_tokens"
+
 
 def normalize_since(value: str) -> str:
     """Normalize a user date to the log timestamp format for a lower bound.
@@ -254,7 +259,11 @@ def _extract_items(text: str) -> list[dict[str, Any]]:
     """Robustly pull a list of suggestion dicts from a possibly-noisy LLM reply.
 
     Handles markdown code fences and both shapes: a bare JSON array, or an
-    object with a "suggestions" array.
+    object with a "suggestions" array. When the reply is neither valid JSON — the
+    model routinely omits the outer ``[ ]`` and streams objects comma-separated, or
+    the reply is truncated mid-object on ``max_tokens`` — fall back to scraping every
+    whole ``{...}`` object individually. That salvages the complete objects instead of
+    discarding the entire batch (the cause of "many iterations, zero matches").
     """
     if not text:
         return []
@@ -262,13 +271,34 @@ def _extract_items(text: str) -> list[dict[str, Any]]:
     candidate = _strip_code_fence(text.strip())
     data = _try_json(candidate) or _try_json(_slice_json(candidate))
     if data is None:
-        return []
+        return _scrape_objects(candidate)
 
     if isinstance(data, dict):
         data = data.get("suggestions", [])
     if not isinstance(data, list):
-        return []
-    return [item for item in data if isinstance(item, dict)]
+        return _scrape_objects(candidate)
+    items = [item for item in data if isinstance(item, dict)]
+    return items or _scrape_objects(candidate)
+
+
+# Top-level {...} with no nested braces — one suggestion object. Non-greedy so each
+# object is matched separately; a truncated trailing object simply doesn't match.
+_OBJECT_PATTERN = re.compile(r"\{[^{}]*\}", re.DOTALL)
+
+
+def _scrape_objects(text: str) -> list[dict[str, Any]]:
+    """Parse each standalone ``{...}`` object, skipping any that don't parse.
+
+    Rescues a reply the whole-document JSON parse rejected: missing outer brackets,
+    or a generation cut off mid-object. Each complete object is kept; the broken tail
+    is dropped.
+    """
+    items: list[dict[str, Any]] = []
+    for match in _OBJECT_PATTERN.finditer(text):
+        obj = _try_json(match.group())
+        if isinstance(obj, dict):
+            items.append(obj)
+    return items
 
 
 def _strip_code_fence(text: str) -> str:
@@ -449,6 +479,35 @@ class SuggestClient(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class _StreamUsage:
+    """Token usage assembled from raw stream events (SDK-object compatible)."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+
+
+@dataclass(frozen=True)
+class _TextBlock:
+    text: str
+    type: str = "text"
+
+
+@dataclass(frozen=True)
+class _StreamResult:
+    """Minimal stand-in for a Messages response, built from the raw event stream.
+
+    Exposes the same ``content`` / ``usage`` / ``stop_reason`` surface the blocking
+    path returns, so ``_ask`` and ``_log_request_metrics`` treat both identically.
+    """
+
+    content: list[_TextBlock]
+    usage: _StreamUsage
+    stop_reason: str | None
+
+
 class AnthropicClient:
     """Thin wrapper over the Anthropic SDK returning structured suggestions."""
 
@@ -502,6 +561,12 @@ class AnthropicClient:
         text = self._ask(
             load_prompt(REPLACEMENTS_PROMPT_NAME), self._build_prompt(batch, known or set())
         )
+        items = _extract_items(text)
+        # A non-empty reply the parser could not turn into any item is the classic
+        # failure (missing outer [ ], truncated JSON). Flag it always — even without
+        # the prompt-logging flag — so silent "0 matches" runs are traceable.
+        if text.strip() and not items:
+            logger.warning("Ответ модели не распарсился ни в одно правило (%d симв)", len(text))
         # `old` must occur in the lines actually shown to the model — this is the
         # phrase we replace, so the model cannot invent a form that was never here.
         shown = "\n".join(line for window in batch for line in window.lines()).lower()
@@ -510,7 +575,7 @@ class AnthropicClient:
         batch_freq = max((w.frequency for w in batch), default=1)
         suggestions = [
             s
-            for item in _extract_items(text)
+            for item in items
             if (s := self._resolve(_normalize_item(item, batch_freq), shown)) is not None
         ]
         if self._verify and suggestions:
@@ -555,13 +620,39 @@ class AnthropicClient:
         mode = "stream" if self._stream else "blocking"
         reasoning = f"effort={self._effort}" if self._thinking else "thinking=off"
         logger.info("Запрос к модели %s (%s, %s)…", self._model, mode, reasoning)
+        if settings.analyzer_log_prompts:
+            logger.debug("Промпт (user):\n%s", user)
         started = time.perf_counter()
         response = self._ask_streaming(params) if self._stream else self._ask_blocking(params)
         self._log_request_metrics(response, mode, time.perf_counter() - started)
-        return next(
+        text = next(
             (block.text for block in response.content if getattr(block, "type", "") == "text"),
             "",
         )
+        stop_reason = getattr(response, "stop_reason", None)
+        if settings.analyzer_log_prompts:
+            # Full raw reply BEFORE the guard/parse — so an empty or malformed answer
+            # (missing outer [ ], truncated mid-object) is visible at its source.
+            logger.debug("Сырой ответ (%d симв, stop=%s):\n%s", len(text), stop_reason, text)
+        self._guard_truncated(text, stop_reason)
+        return text
+
+    @staticmethod
+    def _guard_truncated(text: str, stop_reason: str | None) -> None:
+        """Treat an empty ``max_tokens``-stopped reply as a transient failure to retry.
+
+        Under load the proxy sometimes returns no content with ``stop=max_tokens`` after
+        a minute-long stall. That is a truncated generation, not "nothing to suggest":
+        left as an empty result it would silently zero out the batch and advance the
+        checkpoint past it. Raising routes it through ``_suggest_with_retry``'s backoff,
+        which usually lands a healthy reply on the next attempt. A non-empty reply that
+        merely hit the token cap is kept — its JSON is parsed as far as it goes.
+        """
+        if not text.strip() and stop_reason == _MAX_TOKENS_STOP:
+            raise RuntimeError(
+                "Пустой ответ модели со stop_reason=max_tokens "
+                "(усечённая/зависшая генерация) — повтор"
+            )
 
     def _thinking_params(self) -> dict[str, Any]:
         """Reasoning knobs for the request.
@@ -596,33 +687,80 @@ class AnthropicClient:
         return self._client.messages.create(**params)
 
     def _ask_streaming(self, params: dict[str, Any]) -> Any:
-        with self._client.messages.stream(**params) as stream:
-            if self._on_stream_progress is not None:
-                self._pump_progress(stream)
-            message = stream.get_final_message()
-            if self._on_stream_progress is not None:
-                # Final tick with the exact token count from usage (deltas were approximate).
-                tokens = getattr(getattr(message, "usage", None), "output_tokens", 0) or 0
-                self._on_stream_progress(int(tokens), time.perf_counter() - self._stream_started)
-            return message
+        """Consume the raw SSE event stream and assemble the result ourselves.
 
-    def _pump_progress(self, stream: Any) -> None:
-        """Consume text deltas, reporting approximate tokens + elapsed seconds live.
+        We deliberately DON'T use the SDK's ``.stream()`` accumulator: our proxy emits
+        content blocks with non-contiguous indices (e.g. block 0 then block 2, skipping
+        1), and the SDK snapshot grows its content list one entry per ``content_block_start``
+        — so ``content[2]`` on a delta raises ``IndexError: list index out of range`` and
+        kills every request. Iterating the raw events and concatenating ``text_delta``s is
+        index-agnostic and yields the same text.
+        """
+        self._stream_started = time.perf_counter()
+        with self._client.messages.create(**params, stream=True) as stream:
+            return self._consume_events(stream)
+
+    def _consume_events(self, stream: Any) -> _StreamResult:
+        parts: list[str] = []
+        usage = _StreamUsage()
+        stop_reason: str | None = None
+        chars = 0
+        last_tick = 0.0
+
+        for event in stream:
+            kind = getattr(event, "type", "")
+            if kind == "message_start":
+                usage = self._merge_usage(usage, getattr(event.message, "usage", None))
+            elif kind == "content_block_delta":
+                text = getattr(getattr(event, "delta", None), "text", None)
+                if text:
+                    parts.append(text)
+                    chars += len(text)
+                    last_tick = self._maybe_tick(chars, last_tick)
+            elif kind == "message_delta":
+                usage = self._merge_usage(usage, getattr(event, "usage", None))
+                stop_reason = getattr(getattr(event, "delta", None), "stop_reason", stop_reason)
+
+        if self._on_stream_progress is not None:
+            # Final tick with the exact token count from usage (deltas were approximate).
+            self._on_stream_progress(
+                usage.output_tokens, time.perf_counter() - self._stream_started
+            )
+        return _StreamResult(
+            content=[_TextBlock("".join(parts))], usage=usage, stop_reason=stop_reason
+        )
+
+    @staticmethod
+    def _merge_usage(current: _StreamUsage, delta: Any) -> _StreamUsage:
+        """Fold a stream event's usage into the running total (message_delta wins on output)."""
+        if delta is None:
+            return current
+        return _StreamUsage(
+            input_tokens=getattr(delta, "input_tokens", 0) or current.input_tokens,
+            output_tokens=getattr(delta, "output_tokens", 0) or current.output_tokens,
+            cache_read_input_tokens=(
+                getattr(delta, "cache_read_input_tokens", 0) or current.cache_read_input_tokens
+            ),
+            cache_creation_input_tokens=(
+                getattr(delta, "cache_creation_input_tokens", 0)
+                or current.cache_creation_input_tokens
+            ),
+        )
+
+    def _maybe_tick(self, chars: int, last_tick: float) -> float:
+        """Report approximate tokens + elapsed seconds live, throttled to once a second.
 
         Tokens are estimated from character count (~4 chars/token) — the proxy may not
         surface per-delta usage, so we approximate during the run and correct at the end
-        from ``usage.output_tokens``. Throttled to once a second to avoid console spam.
+        from ``usage.output_tokens``.
         """
-        assert self._on_stream_progress is not None
-        self._stream_started = time.perf_counter()
-        chars = 0
-        last_tick = 0.0
-        for text in stream.text_stream:
-            chars += len(text)
-            elapsed = time.perf_counter() - self._stream_started
-            if elapsed - last_tick >= _STREAM_TICK_SECONDS:
-                self._on_stream_progress(chars // _CHARS_PER_TOKEN, elapsed)
-                last_tick = elapsed
+        if self._on_stream_progress is None:
+            return last_tick
+        elapsed = time.perf_counter() - self._stream_started
+        if elapsed - last_tick < _STREAM_TICK_SECONDS:
+            return last_tick
+        self._on_stream_progress(chars // _CHARS_PER_TOKEN, elapsed)
+        return elapsed
 
     def _verify_suggestions(
         self, suggestions: list[ReplacementSuggestion]
@@ -942,9 +1080,7 @@ class ReplacementAnalyzer:
                         # This batch failed after all retries: freeze the committed
                         # prefix before it so its window range is retried next run.
                         state.mark_failed(idx)
-                self._emit_prefix_progress(
-                    state, window_counts, total, start_offset, on_progress
-                )
+                self._emit_prefix_progress(state, window_counts, total, start_offset, on_progress)
                 if stopping:
                     break
                 # Refill up to the concurrency limit, unless a batch has failed

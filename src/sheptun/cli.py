@@ -60,8 +60,11 @@ def _setup_analyzer_logging(source_log: Path) -> Path:
         handler = logging.FileHandler(analyzer_log, encoding="utf-8")
         handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
         logger.addHandler(handler)
-        logger.setLevel(logging.INFO)
         logger.propagate = False  # don't leak into the root sheptun.log handler
+    # Set the level every call (not just on first setup): the prompt/reply logging in
+    # AnthropicClient emits at DEBUG, so it stays invisible unless the flag lifts the
+    # logger to DEBUG. Without the flag INFO keeps the log lean.
+    logger.setLevel(logging.DEBUG if settings.analyzer_log_prompts else logging.INFO)
     return analyzer_log
 
 
