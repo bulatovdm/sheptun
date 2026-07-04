@@ -24,6 +24,27 @@ VoiceInk — нативное macOS-приложение для voice-to-text с
 
 **Сложность:** минимальная (5 строк кода)
 
+> **Стоит ли слать в initial_prompt весь `replacements.yaml` (словарь)? — Нет.** Разобрано по коду
+> VoiceInk (2026-07). VoiceInk словарь в Whisper `initial_prompt` **не кладёт вообще**. Разделяет на
+> три слоя:
+> - **Whisper `initial_prompt`** (`Transcription/Whisper/WhisperPrompt.swift`) — ровно **одна
+>   приветственная фраза на язык** (`ru`: «Здравствуйте, как ваши дела? Приятно познакомиться.»).
+>   Уходит в whisper.cpp как `params.initial_prompt` (`LibWhisper.swift`) без обрезки — потому что она
+>   и так короткая. Это разогрев языка/стиля, НЕ словарь.
+> - **Custom Vocabulary** (`Services/CustomVocabularyService.swift`) — список только правильных слов
+>   (`"Important Vocabulary: слово1, слово2, …"`, без пар «искажение→правильное»). Идёт **не в
+>   whisper**, а в LLM-слой (AI Enhancement, как «spelling authority») и в streaming-ASR-провайдеры с
+>   родным keyword-boost.
+> - **Word Replacements** — детерминированные пары после распознавания (= наш `replacements.yaml`).
+>
+> Почему не весь словарь в промпт: Whisper режет `initial_prompt` до **~224 токенов** (последних) —
+> 2118 правил (десятки тысяч токенов) физически не влезут, останутся последние ~30-40, обрубленные. И
+> ключи-искажения слать вредно — это подсказка модели неправильных форм. Совпадает с нашим измерением
+> (`docs/llm-enhancement-research.md`): «простыня из сотен терминов вредит, работает компактный точечный
+> словарь (единицы-десятки)». Вывод: в `SHEPTUN_INITIAL_PROMPT` — короткий разогрев (как сейчас,
+> генерит агент `analyze-logs`); полный словарь — только детерминированным пост-фиксом
+> (`replacements.yaml`) и, если появится LLM-слой, компактной выжимкой правильных написаний туда.
+
 ### 2. Улучшенный фильтр галлюцинаций
 
 **Что делает VoiceInk (`TranscriptionOutputFilter`):**
@@ -209,3 +230,23 @@ VAD: Silero v5 через whisper.cpp (threshold=0.50, min_speech=250ms, min_sil
 ### Каталог моделей VoiceInk
 - Локальные: tiny, base, large-v2, large-v3, large-v3-turbo, large-v3-turbo-q5_0
 - Облачные: Groq Whisper, ElevenLabs Scribe v1/v2, Deepgram Nova 3, Mistral Voxtral, Gemini 2.5/3, Soniox v4
+
+### Провайдеры AI Enhancement (LLM-пост-обработка)
+Enum `AIProvider` в `Services/AIEnhancement/AIService.swift` (2026-07). Enhancement — это прогон
+транскрипта через LLM (пунктуация, регистр, грамматика, паразиты), НЕ распознавание.
+
+- **Локальные:** **Ollama** (`http://localhost:11434`), **Local CLI** (`codex`/`copilot`/`pi` —
+  промпт через stdout, см. `docs/llm-enhancement-research.md`).
+- **Облачные LLM:** **Cerebras**, **Groq**, **Gemini** (Google), **Anthropic** (Claude, свой
+  `/v1/messages`), **OpenAI**, **OpenRouter**, **Mistral**. Все, кроме Anthropic, — OpenAI-совместимый
+  `/chat/completions`.
+- **Custom:** любой OpenAI-совместимый эндпоинт со своим `baseURL`.
+
+Примечание: тот же enum содержит **ElevenLabs / Deepgram / Soniox / Speechmatics / AssemblyAI**, но по
+их эндпоинтам (`/speech-to-text`, `/listen`, `/transcript`) это облачное **распознавание** (ASR), а не
+enhancement. Enum общий, слои разные.
+
+Для Sheptun: наша инфраструктура (`log_analyzer.py`, `verification.py`) уже ходит в LLM через
+**OpenAI/Anthropic-совместимый** прокси — тот же паттерн «custom baseURL», что у VoiceInk. Если делать
+enhancement-режим, провайдером логично взять локальный OpenAI-совместимый эндпоинт (свой `mlx-lm` или
+LM Studio при совместимом рантайме), а не завязываться на облако.
