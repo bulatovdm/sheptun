@@ -79,6 +79,8 @@
 - VoiceInk совмещает whisper.cpp и Parakeet через FluidAudio (CoreML→ANE) — несколько локальных бэкендов на macOS жизнеспособны.
 - Бенчмарк-репо: [mac-whisper-speedtest](https://github.com/anvanvan/mac-whisper-speedtest) (8 бэкендов на одном аудио; для `large`: fluidaudio-coreml 0.19s > parakeet-mlx 0.50s > …), [onnx-asr](https://github.com/istupakov/onnx-asr).
 
+**Живой тест Parakeet-tdt-0.6b-v3 на нашем аудио (2026-07-04, `ParakeetRecognizer` через NeMo, `dataset/audio/`):** русский распознаёт неплохо по смыслу, но англо-термины **транслитерирует в кириллицу** — тот же архитектурный потолок, что у GigaAM (см. `gigaam-english-terms.md`). Примеры: `commit`→`комит`, `dry solid`→`драй солид`, `Cloud.md`→`Клаудэ точка мд`, `toggle`→`тогл`. Скорость 4 файла/2.6с (загрузка модели ~286с разово). **Вердикт: не годится для смешанной ru/en технической речи** — словарём такую кашу не собрать. Whisper turbo остаётся лучшим выбором (нативная латиница + initial_prompt). Модель после теста удалена из кэша.
+
 ---
 
 ## 5. Рекомендации для Sheptun
