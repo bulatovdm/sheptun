@@ -573,14 +573,51 @@ class AnthropicClient:
         # Fallback only when no index is wired: the batch-wide max is a coarse
         # over-estimate, but it keeps stand-alone client usage working.
         batch_freq = max((w.frequency for w in batch), default=1)
-        suggestions = [
-            s
-            for item in items
-            if (s := self._resolve(_normalize_item(item, batch_freq), shown)) is not None
-        ]
+        suggestions = self._resolve_items(items, shown, batch_freq)
         if self._verify and suggestions:
             suggestions = self._verify_suggestions(suggestions)
         return suggestions
+
+    def _resolve_items(
+        self, items: list[dict[str, Any]], shown: str, batch_freq: int
+    ) -> list[ReplacementSuggestion]:
+        """Normalise + drop hallucinated candidates, logging why each was dropped.
+
+        This is where a candidate the model DID propose silently disappears — either
+        because normalisation rejected it (empty/no-op) or its ``old`` never appeared
+        in the shown lines (invented). Under the prompt-logging flag each drop is
+        reported with its reason, so a "model suggested X but X didn't reach the file"
+        gap is traceable end to end.
+        """
+        log = settings.analyzer_log_prompts
+        kept: list[ReplacementSuggestion] = []
+        dropped = 0
+        for item in items:
+            normalized = _normalize_item(item, batch_freq)
+            if normalized is None:
+                dropped += 1
+                if log:
+                    logger.debug("  отброшено (пустое/no-op): %s", item)
+                continue
+            resolved = self._resolve(normalized, shown)
+            if resolved is None:
+                dropped += 1
+                if log:
+                    logger.debug(
+                        "  отброшено (old не в показанных строках, галлюцинация): %r -> %r",
+                        normalized.old,
+                        normalized.new,
+                    )
+                continue
+            kept.append(resolved)
+        if log:
+            logger.debug(
+                "Кандидатов из ответа: %d, принято: %d, отброшено: %d",
+                len(items),
+                len(kept),
+                dropped,
+            )
+        return kept
 
     def _resolve(
         self, suggestion: ReplacementSuggestion | None, shown: str

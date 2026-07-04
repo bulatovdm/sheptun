@@ -1049,6 +1049,21 @@ class TestRequestLogging:
             client.suggest(batch)
         assert "не распарсился" not in caplog.text
 
+    def test_flag_on_logs_dropped_candidate_reason_and_summary(self, monkeypatch, caplog) -> None:
+        # Model proposes 'выдумка' whose 'old' never appears in the shown line -> dropped
+        # as a hallucination. Under the flag the drop reason and the tally are logged, so
+        # "suggested but didn't reach the file" is traceable.
+        _patch_log_prompts(monkeypatch, True)
+        reply = '[{"old":"выдумка","new":"X","confidence":"high","reason":""}]'
+        client = self._client(reply)
+        batch = [ContextWindow(target="реальная строка", before=(), after=(), frequency=1)]
+        with caplog.at_level("DEBUG", logger="sheptun.analyzer"):
+            result = client.suggest(batch)
+        assert result == []
+        assert "галлюцинация" in caplog.text  # the drop reason
+        assert "Кандидатов из ответа: 1" in caplog.text  # the summary tally
+        assert "принято: 0" in caplog.text
+
 
 class TestPhraseIndex:
     """Frequency lookup over the actual Recognized lines."""
