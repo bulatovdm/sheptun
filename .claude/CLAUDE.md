@@ -53,6 +53,8 @@ src/sheptun/
 ├── hotkeys.py      # HotkeyManager (pynput) for global hotkeys
 ├── status.py       # Console status indicators (Rich)
 ├── settings.py     # Settings from .env
+├── formatting.py   # TechnicalFormatter: spoken symbols → code (snake_case, casing)
+├── text_cleanup.py # TextCleaner: collapse seam duplicates (..env→.env, repeated words)
 ├── dataset.py      # DatasetRecorder for fine-tuning data collection
 ├── i18n.py         # Russian translations
 ├── verification.py # Transcript verification via Claude Agent SDK
@@ -62,7 +64,7 @@ src/sheptun/
 └── types.py        # Protocols, dataclasses, enums (AppState)
 ```
 
-**Data flow:** Microphone → VAD → Whisper → Hallucination filter → Spell correction → Word replacements → CommandParser → KeyboardSender
+**Data flow:** Microphone → VAD → Whisper → Hallucination filter → Spell correction → Word replacements (`replacements.yaml`) → Technical formatting (`formatting.py`) → Text cleanup (`text_cleanup.py`, collapse duplicates) → CommandParser → KeyboardSender
 
 ## Configuration
 
