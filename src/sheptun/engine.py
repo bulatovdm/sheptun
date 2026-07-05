@@ -11,6 +11,7 @@ from sheptun.keyboard import MacOSKeyboardSender
 from sheptun.recognition import WhisperRecognizer
 from sheptun.settings import settings
 from sheptun.status import ConsoleStatusIndicator, SimpleStatusIndicator
+from sheptun.text_cleanup import TextCleaner
 from sheptun.types import (
     Action,
     ActionType,
@@ -48,6 +49,7 @@ class BaseVoiceEngine:
         self._recorder: ContinuousAudioRecorder | None = None
         self._dataset_recorder = DatasetRecorder() if record_dataset else None
         self._formatter = TechnicalFormatter()
+        self._cleaner = TextCleaner()
         self._state = AppState.IDLE
         self._lock = threading.Lock()
         self._recognition_queue: queue.Queue[bytes | None] = queue.Queue()
@@ -117,6 +119,7 @@ class BaseVoiceEngine:
             if result and result.text:
                 text = self._command_parser.apply_replacements(result.text)
                 text = self._formatter.format(text)
+                text = self._cleaner.clean(text)
                 self._log(f"Recognized: '{text}'")
                 self._save_to_dataset(audio_data, result.text)
                 action = self._command_parser.parse(text)
@@ -189,6 +192,7 @@ class BaseVoiceEngine:
 
             text = self._command_parser.apply_replacements(result.text)
             text = self._formatter.format(text)
+            text = self._cleaner.clean(text)
             if text != result.text:
                 self._log(f"Recognized: '{result.text}' -> '{text}'")
             else:
