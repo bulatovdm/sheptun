@@ -16,8 +16,10 @@ Everything else — window building, prompts, dedup, YAML writing — is reused 
 
 from __future__ import annotations
 
+import fcntl
 import json
 import sys
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -43,7 +45,7 @@ from sheptun.prompts import load_prompt
 from sheptun.settings import settings
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
 
 # Checkpoint kept apart from the SDK pipeline's, so the two never fight over one position.
 SKILL_STATE_FILE = "skill_analyzer_state.json"
@@ -225,45 +227,90 @@ def _cmd_plan(argv: list[str]) -> int:
     return 0
 
 
+@contextmanager
+def _write_lock() -> Iterator[None]:
+    """Serialise the read-modify-write of replacements.yaml and the checkpoint.
+
+    Subagents commit their own batches concurrently, so without this two of them
+    could load the same rule set, each append their own rules, and the second write
+    would silently drop the first one's.
+    """
+    lock_path = settings.dataset_path / "skill_analyzer.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("w", encoding="utf-8") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
 def _cmd_commit(argv: list[str]) -> int:
-    """Vet one subagent reply, write it out, and advance the checkpoint."""
+    """Vet one subagent reply, write the rules out, and advance the checkpoint.
+
+    Called by the subagent that produced the reply, so writes are serialised by
+    ``_write_lock``. The checkpoint only moves forward: batches finish out of order
+    under concurrency, and a later batch must never pull the position backwards.
+    """
     args = _parse_kv(argv)
     log_path = Path(args.get("log", str(settings.log_file)))
     reply_path = Path(args["reply"])
-    report_path = Path(args["report"])
     position = int(args["position"])
 
     raw = reply_path.read_text(encoding="utf-8")
-    accepted, notes = normalize_reply(
-        raw,
-        log_path,
-        args.get("min-confidence", settings.analyzer_min_confidence),
-        _existing_keys(),
-    )
 
-    writer = SuggestionWriter()
-    writer.append_report(accepted, report_path)
-    applied = writer.apply(accepted, get_replacements_path())
-
-    state = skill_state()
-    if args.get("advance", "1") == "1":
-        state.save(position, _runs(state))
-
-    print(
-        json.dumps(
-            {
-                "accepted": [
-                    {"old": s.old, "new": s.new, "conf": s.confidence, "freq": s.frequency}
-                    for s in accepted
-                ],
-                "applied": applied,
-                "rejected": notes,
-                "position": position,
-            },
-            ensure_ascii=False,
+    with _write_lock():
+        accepted, _ = normalize_reply(
+            raw,
+            log_path,
+            args.get("min-confidence", settings.analyzer_min_confidence),
+            _existing_keys(),
         )
-    )
+        applied = SuggestionWriter().apply(accepted, get_replacements_path())
+        state = skill_state()
+        if args.get("advance", "1") == "1" and position > state.position():
+            state.save(position, _runs(state))
+        done, total, added = state.position(), _window_total(args), _bump_added(applied)
+
+    scope = f"{done}/{total}, осталось {max(total - done, 0)}" if total else f"{done}"
+    print(f"[окна {scope}] новых правил: +{applied}, всего за прогон: {added}")
     return 0
+
+
+def _window_total(args: dict[str, str]) -> int:
+    """Total window count, passed in by the orchestrator to keep commit cheap.
+
+    Recomputing it here would re-parse the whole log on every batch, so the caller
+    supplies it once from the plan; without it the progress line just omits the total.
+    """
+    raw = args.get("total")
+    return int(raw) if raw and raw.isdigit() else 0
+
+
+_ADDED_FILE = "skill_analyzer_added.json"
+
+
+def _added() -> int:
+    """Rules written by THIS run so far.
+
+    Each batch is its own process, so the counter lives on disk next to the
+    checkpoint and resets together with it.
+    """
+    path = settings.dataset_path / _ADDED_FILE
+    if not path.exists():
+        return 0
+    try:
+        return int(json.loads(path.read_text(encoding="utf-8")).get("added", 0))
+    except (json.JSONDecodeError, OSError, TypeError, ValueError):
+        return 0
+
+
+def _bump_added(applied: int) -> int:
+    total = _added() + applied
+    path = settings.dataset_path / _ADDED_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"added": total}) + "\n", encoding="utf-8")
+    return total
 
 
 def _runs(state: AnalyzerState) -> int:
@@ -277,11 +324,29 @@ def _runs(state: AnalyzerState) -> int:
     return int(value) if isinstance(value, int) else 0
 
 
-def _cmd_status(_argv: list[str]) -> int:
+def _cmd_status(argv: list[str]) -> int:
+    """Checkpoint state. With ``--total N`` prints the one-line progress instead of JSON.
+
+    The orchestrator calls this between groups: a subagent's own stdout never reaches
+    the user's terminal, so the progress line has to be printed by the caller.
+    """
+    args = _parse_kv(argv)
     state = skill_state()
+    done = state.position()
+    total = _window_total(args)
+    if total:
+        print(
+            f"[окна {done}/{total}, осталось {max(total - done, 0)}] правил за прогон: {_added()}"
+        )
+        return 0
     print(
         json.dumps(
-            {"state_file": str(state.path), "position": state.position(), "runs": _runs(state)},
+            {
+                "state_file": str(state.path),
+                "position": done,
+                "runs": _runs(state),
+                "added": _added(),
+            },
             ensure_ascii=False,
         )
     )
@@ -291,6 +356,7 @@ def _cmd_status(_argv: list[str]) -> int:
 def _cmd_reset(_argv: list[str]) -> int:
     state = skill_state()
     state.reset()
+    (settings.dataset_path / _ADDED_FILE).unlink(missing_ok=True)
     print(json.dumps({"reset": str(state.path)}, ensure_ascii=False))
     return 0
 
