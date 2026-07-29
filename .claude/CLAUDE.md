@@ -139,6 +139,19 @@ LLM pipeline behind `sheptun analyze-replacements` — decomposed by SRP, each s
 
 ## Skills
 
+- **analyze-replacements-skill** (`.claude/skills/analyze-replacements-skill/`) — скилл-двойник CLI
+  `sheptun analyze-replacements`: тот же лог, те же промпты (`prompts/replacements_*.md`) и та же
+  валидация, но модель — субагенты Claude Code (`replacement-batch`, haiku, effort medium), а не
+  Anthropic SDK. Итерации + свой чекпоинт `dataset/skill_analyzer_state.json` (не пересекается с
+  чекпоинтом CLI), несколько батчей параллельно, дозапись правил в `replacements.yaml` после
+  каждого батча. Обход лога — **от свежих строк к старым** (флаг `--oldest-first` вернёт
+  хронологический порядок CLI); позиция чекпоинта считается от конца лога. Детерминистская
+  часть — `src/sheptun/skill_analyzer.py` (`plan` / `commit` / `status` / `reset`),
+  переиспользует классы `log_analyzer.py`. `plan` раскладывает готовые задания по
+  `tmp/skill_batch_<N>.txt` и возвращает только пути — текст лога не проходит через контекст
+  оркестратора.
+  Настройки прогона — `config.yaml` рядом со SKILL.md; `effort` субагента задаётся только во
+  frontmatter `.claude/agents/replacement-batch/AGENT.md` (Agent tool такого параметра не имеет).
 - **review-replacements** (`.claude/skills/review-replacements/`) — reviews new rules in `replacements.yaml` after an analysis pass: flags real-word keys / punctuation / duplicates / dubious translations / language-mix, writes `replacements.check.yaml` + `REPLACEMENTS_REVIEW.md`, asks the user before removing bad rules from the live file, and proposes prompt improvements. Bundles CRITERIA.md, SENSITIVE.md, PROMPT_TUNING.md, scripts/make_check.py. Trigger by asking to review/audit replacement rules or after `sheptun analyze-replacements`.
 
 ## Git Commits

@@ -356,6 +356,42 @@ sheptun analyze-replacements --reset-state
 
 Промпты модели вынесены в `src/sheptun/prompts/*.md` — их можно править без изменения кода.
 
+### То же самое через скилл Claude Code (без API-ключа)
+
+`.claude/skills/analyze-replacements-skill/` — двойник этой команды, где вместо запросов
+Anthropic SDK работают **субагенты Claude Code**. Лог, промпты (`prompts/replacements_*.md`),
+валидация кандидатов и формат записи — те же самые; отличается только исполнитель модели.
+Ключ и extra `[llm]` не нужны.
+
+Запуск — попросить Claude Code проанализировать лог на замены (или `/analyze-replacements-skill`).
+Оркестратор строит план, раздаёт батчи субагентам пачками и после каждого батча дописывает
+принятые правила в `replacements.yaml`.
+
+Отличия от CLI-прогона:
+
+- **Обход от свежих строк к старым** (у CLI — хронологический). Свежая речь и есть источник
+  новых ошибок; ранняя история обычно уже разобрана. Вернуть хронологию — `--oldest-first`.
+- **Свой чекпоинт** `dataset/skill_analyzer_state.json` — с чекпоинтом CLI не пересекается,
+  прогоны не мешают друг другу.
+- **Отчёт** `tmp/replacements.skill.<время>.yaml`; в `replacements.yaml` правила дописываются
+  всегда (флага `--apply` нет).
+- Задания батчей `plan` раскладывает по `tmp/skill_batch_<N>.txt`, а субагент читает файл сам —
+  текст лога не проходит через контекст оркестратора.
+
+Настройки прогона — `config.yaml` рядом со `SKILL.md` (модель субагента, число батчей,
+параллельность, размер батча, контекст, порог уверенности). Reasoning `effort` субагента
+задаётся во frontmatter `.claude/agents/replacement-batch/AGENT.md` (Agent tool такого
+параметра не принимает).
+
+Детерминистская часть — `src/sheptun/skill_analyzer.py`, переиспользует классы `log_analyzer.py`:
+
+```bash
+python -m sheptun.skill_analyzer status                      # позиция чекпоинта
+python -m sheptun.skill_analyzer plan --max-batches 3        # батчи + файлы заданий
+python -m sheptun.skill_analyzer commit --reply … --report … --position N
+python -m sheptun.skill_analyzer reset                       # сбросить чекпоинт
+```
+
 ## Фильтрация галлюцинаций
 
 Whisper иногда генерирует ложные транскрипции на тишине или шуме — так называемые "галлюцинации". Типичные примеры: "Продолжение следует...", "Спасибо за просмотр!", "Субтитры сделал...".

@@ -1,0 +1,30 @@
+# Настройки прогона скилла analyze-replacements-skill.
+# Меняй здесь — SKILL.md читает эти значения как значения по умолчанию.
+
+# Модель для субагентов, которые анализируют батчи (оркестратор — текущая модель сессии).
+# Перекрывает model из .claude/agents/replacement-batch/AGENT.md.
+# Допустимо: haiku | sonnet | opus
+subagent_model: haiku
+
+# Reasoning effort субагента. Agent tool его НЕ принимает — он задаётся в frontmatter
+# .claude/agents/replacement-batch/AGENT.md (поле effort). Значение здесь справочное:
+# чтобы поменять — правь AGENT.md.
+subagent_effort: medium
+
+# Сколько батчей обработать за один прогон (итераций). 0 = все оставшиеся.
+max_batches: 5
+
+# Сколько субагентов запускать одновременно (батчей в одном параллельном заходе).
+concurrency: 3
+
+# Сколько окон контекста в одном батче (= в одном субагенте).
+batch_size: 8
+
+# Строк контекста ±N вокруг целевой строки.
+context_lines: 5
+
+# Минимальная частота строки, чтобы попасть в анализ.
+min_freq: 1
+
+# Порог уверенности для записи правила: low | medium | high
+min_confidence: high
