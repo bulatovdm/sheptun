@@ -117,6 +117,12 @@ def plan_batches(
         batches = batches[:max_batches]
 
     task_dir.mkdir(parents=True, exist_ok=True)
+    # A full-log plan writes thousands of task files (hundreds of MB); leftovers from an
+    # earlier run would pile up on top of them and, worse, a stale skill_batch_N.txt could be
+    # picked up by an agent whose own batch failed to render.
+    for stale in (*task_dir.glob("skill_batch_*.txt"), *task_dir.glob("skill_reply_*.json")):
+        stale.unlink(missing_ok=True)
+
     plans: list[BatchPlan] = []
     cursor = start_offset
     for i, batch in enumerate(batches, start=1):
