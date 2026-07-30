@@ -2603,3 +2603,305 @@
 "venf example": "в .env.example"
 "сидром данных": "сидером данных"  # freq=7, conf=high — Устойчивое искажение слова seeder (database seeder в Laravel/PHP); русское devspeak-написание — сидер
 "сидри данных": "сидеры данных"  # freq=2, conf=high — ASR искажение 'сидеры' (seeders, Laravel seeder в контексте заполнения БД)
+"сидоры": "сидеры"  # freq=40, conf=high — ASR error for database seeders (сидеры)
+"стейдж": "stage"  # freq=68, conf=high — Искажение англ. stage при произнесении кириллицей
+"провиженинг": "provisioning"  # freq=4, conf=high — вариант ошибки ASR при распознавании provisioning с другим искажением звучания
+"prot": "prod"  # freq=15, conf=high — ASR artifact: three-letter environment abbreviation PROT (missing D) → PROD (production)
+"микроэзметка": "микроразметка"  # freq=1, conf=high — технический термин, искажение ASR для микроразметки (microdata markup)
+"коммити пуш": "commit и push"  # freq=2, conf=high — ASR error in plural form + command phrase
+"полимортная": "полиморфная"  # freq=1, conf=high — Систематическая ошибка Whisper: искажение прилагательного 'полиморфная' (polymorphic)
+"пройде": "проде"  # freq=75, conf=high — ASR adds extra vowel; production environment colloquialism
+"кулбэк": "callback"  # freq=3, conf=high — кириллическая транслитерация callback
+"рулаут": "rollout"  # freq=1, conf=high — English 'rollout' misheard as Russian-like 'рулаут', technical deployment term
+"Multimetic": "Multimedica"  # freq=5, conf=high — Искажение имени собственного проекта Multimedia
+"gitu": "GitHub"  # freq=3, conf=high — GitHub shortened and distorted by ASR
+"чикбоксом": "чекбоксом"  # freq=1, conf=high — ASR mishearing soft ч sound in UI component name
+"мерзжешь": "мерджишь"  # freq=1, conf=high — ASR ошибка: слово merge в форме второго лица, систематическое искажение z+j вместо j
+"очерединить": "очередить"  # freq=1, conf=high — ASR ошибка: несуществующее слово, искажение от глагола очередить (выстроить в очередь)
+"резоввер": "резолвер"  # freq=1, conf=high — ASR ошибка: англицизм resolver, Whisper добавил лишний в
+"смердишь": "смережить"  # freq=1, conf=high — ASR confusion of merge imperative form
+"сидер": "seeder"  # freq=193, conf=high — систематическое искажение англ. термина database seeder
+"эмблемтируется": "имплементируется"  # freq=1, conf=high — ASR confusion: 'embed' sound interpreted as 'emblem', not implementation verb
+"ретриф": "retrieve"  # freq=1, conf=high — Cyrillic rendering of 'retrieve' operation in data access context
+"referation": "referential"  # freq=1, conf=high — Ошибка распознавания технического термина referential action
+"фуллбэка": "fallback"  # freq=1, conf=high — Устойчивая кириллизация английского термина fallback при произнесении в контексте техархитектуры
+"дермовитавенеролог": "дерматовенеролог"  # freq=1, conf=high — Систематическое искажение термина специальности; фонетически близко к правильному написанию
+"риновачу": "Renovatio"  # freq=1, conf=high — ASR error: Cyrillic transcription of English product name Renovatio
+"ринновацию": "Renovatio"  # freq=3, conf=high — ASR error: mixed Cyrillic-Latin transcription of product name Renovatio
+"филбэк": "fallback"  # freq=1, conf=high — ASR error: English term 'fallback' misrecognized as Russian 'филбэк'
+"детестирую": "дотестирую"  # freq=1, conf=high — ASR error in testing context - дотестирую is correct completion form
+"неймеспейс": "namespace"  # freq=1, conf=high — ASR mishearing of technical term 'namespace'
+"фреймворд": "фреймворк"  # freq=1, conf=high — ASR mishearing: -д vs -к at word end, framework distorted
+"полимортный": "полиморфный"  # freq=1, conf=high — Систематическая ошибка ASR для технического термина 'полиморфный' (polymorphic), искажение ясно слышно в произношении
+"кулбеке": "callback"  # freq=1, conf=high — Явное искажение термина callback, встречается неоднократно
+"коллбек": "callback"  # freq=5, conf=high — Искажение callback в кириллице, распространённая ошибка ASR
+"фаервола": "firewall"  # freq=1, conf=high — Явное искажение термина firewall
+"интекс": "индекс"  # freq=3, conf=high — ASR distortion of the Russian word индекс (index)
+"toray": "toArray"  # freq=1, conf=high — Искажение имени метода PHP toArray, фонетическое расстояние 1–2 символа
+"плачёжного": "платежного"  # freq=2, conf=high — ASR confusion of ча/ё with та/е in payment term
+"репетиториев": "репозиториев"  # freq=1, conf=high — устойчивое искажение распознавания слова, перепутаны звуки в 'репозиториев'
+"вереным": "верным"  # freq=1, conf=high — ошибка распознавания прилагательного 'верный' в творительном падеже, пропущена буква
+"филамента": "Filament"  # freq=22, conf=high — Искажение названия Laravel-фреймворка Filament, повторяется в контексте ресурсов
+"тпдфки": "PDFки"  # freq=1, conf=high — Искажение аббревиатуры PDF при упоминании скачивания или файлов
+"комманды": "команды"  # freq=1, conf=high — двойное м — систематическая ошибка распознавания слова команды
+"гандидаты": "кандидаты"  # freq=1, conf=high — ASR confusion: г vs к, одна буква, явное искажение технического термина
+"сопадения": "совпадения"  # freq=1, conf=high — пропуск слога 'в' в слове 'совпадения'
+"виспле": "Whisper"  # freq=1, conf=high — Systematic ASR misrecognition of the Whisper model name in technical context
+"интроактивно": "интерактивно"  # freq=1, conf=high — ASR error: 'интроактивно' is not a real Russian word; 'интерактивно' is correct term for interactive UI
+"физкализация": "фискализация"  # freq=1, conf=high — Опечатка буквы 'ф' вместо 'фск' — искажение термина реестрации платежей в налоговой системе
+"флан": "план"  # freq=9, conf=high — ASR confusion: п/ф; technical context о плане работы
+"депить": "deploy"  # freq=2, conf=high — Development terminology: deploy/deployment pattern
+"вивхук": "вебхук"  # freq=1, conf=high — ASR error: webhook (вебхук) in Russian tech terminology, garbled as вивхук
+"павитка": "памятка"  # freq=2, conf=high — Consistent ASR error: 'павитка' is not a Russian word, 'памятка' (note/reminder) is the correct term, phonetically close
+"випполинг": "polling"  # freq=1, conf=high — устойчивая ошибка распознавания технического термина polling
+"тока": "только"  # freq=10, conf=high — ASR mishearing of 'только' (only) in phrase 'копировать тока изменения'
+"извечу": "изучу"  # freq=1, conf=medium — phonetic error in reading/studying, context implies document review
+"дистерминическую": "детерминическую"  # freq=1, conf=high — Prefix error: incorrect 'ди-' instead of 'де-' in technical term for deterministic check
+"лукапом": "lookup"  # freq=2, conf=high — Искажение технического термина lookup в инструментальном падеже
+"атрибьюит": "атрибутирует"  # freq=1, conf=high — Whisper ошибка для технического термина 'attribute' — искажённое произнесение английского слова в кириллице, правильная русская форма глагола
+"парамтом": "параметром"  # freq=1, conf=high — Распространённая опечатка: буквы в слове 'параметром' переставлены местами при распознавании
+"коммитити": "коммить"  # freq=1, conf=high — ASR误recognition of 'commits' plural; distorted form not present in Russian lexicon
+"дами": "dummy"  # freq=46, conf=high — распознавание английского слова dummy как русское дами при загрузке изображения в тесте
+"перезагрозил": "перезагрузил"  # freq=1, conf=high — систематическая ошибка ASR в слове 'перезагрузил' (перезагрузить страницу); 'перезагрозил' не существует в русском языке
+"сидром": "сидером"  # freq=7, conf=high — ASR error: confused ь-ending, standard Russian medical term
+"гэп": "gap"  # freq=4, conf=high — Cyrillic transcription of English term gap
+"фейт": "фейд"  # freq=3, conf=high — ASR error for fade transition effect, appears in UI context
+"ревеновация": "Renovatio"  # freq=1, conf=high — Cyrillic distortion of product name Renovatio, appears consistently in multiple fragments
+"опасти": "opacity"  # freq=3, conf=high — Whisper исказил английский термин CSS — opacity (прозрачность)
+"рапер": "wrapper"  # freq=9, conf=high — Систематическое искажение англ. wrapper (обёртка, контейнер)
+"рошей": "крошек"  # freq=5, conf=high — ASR artifact for breadcrumb term (хлебные крошки)
+"иидентификатор": "идентификатор"  # freq=1, conf=high — Dittography: duplicate initial и
+"транзишен": "transition"  # freq=10, conf=high — CSS transition term misrecognized
+"провайде": "Provider"  # freq=208, conf=high — Искажение названия компонента/сервиса в технологическом контексте работы с БД
+"пенели": "панели"  # freq=1, conf=high — ASR error: искажение слова 'панели' (электрические детские панели)
+"плочный": "плотный"  # freq=1, conf=high — Искажение прилагательного, систематическая ошибка распознавания адъектива 'плотный'
+"reasures": "Resources"  # freq=1, conf=high — Consistent Whisper error for technical term; old is not a real word
+"с криптом": "скриптом"  # freq=352, conf=high — ошибка распознавания приглушённого начального звука в слове script
+"провижена": "provision"  # freq=6, conf=high — ASR artifact for configuration/script term 'provision'
+"продакшна": "production"  # freq=3, conf=high — ASR artifact for technical term 'production'
+"реноватё": "Renovatio"  # freq=1, conf=high — Consistent ASR misrecognition of product name Renovatio in Cyrillic input; proper noun in canonical Latin form
+"выгрызи": "выгрузи"  # freq=1, conf=high — ASR confusion: 'гн' звук стал 'рыз'; выгрузи — команда экспорта логов (явный контекст)
+"зафиз": "запись"  # freq=1, conf=high — SPF-запись диктуется как зафиз, техническое имя в контексте конфигурации DNS
+"композ": "compose"  # freq=182, conf=high — искажение названия инструмента Docker Compose, реальное слово compose не существует в русском диктовании
+"пропагодируется": "пропагируется"  # freq=1, conf=high — ASR error: non-existent word form; correct term is пропагируется (to propagate)
+"прелоудинга": "preloading"  # freq=1, conf=high — ASR error: прелоудинга is a misspelling of the tech term preloading
+"деф": "dev"  # freq=80, conf=high — ASR error: 'деф режим' → 'dev режим' (development mode abbreviation)
+"выпил": "вывел"  # freq=16, conf=high — ASR confusion: 'выпил' (past tense of drink) misrecognized instead of 'вывел' (removed/eliminated); robust pattern in dev context (мертвые блоки)
+"gasp": "GSAP"  # freq=2, conf=high — Animation library name; phonetically plausible ASR error in technical context
+"перегонерируй": "перегенерируй"  # freq=1, conf=high — Опечатка в форме глагола, двойная гласная
+"тайп": "type"  # freq=15, conf=high — Распознание union type как union тайп в техническом контексте
+"диф": "diff"  # freq=82, conf=high — Искажение термина diff, Whisper систематически распознаёт как русское 'диф'
+"снэпшитс": "snapshots"  # freq=1, conf=high — Англицизм во множественном числе; правильная форма snapshots
+"скилл": "skill"  # freq=676, conf=high — Распространённое искажение заимствованного слова, правильное написание skill
+"слаг": "slug"  # freq=12, conf=high — ASR error for URL slug technical term
+"коррозовилась": "резолвилась"  # freq=1, conf=high — DNS resolution mistaken for corrosion; not a real word
+"ките": "гите"  # freq=3, conf=high — Whisper error on 'гит' (git) in oblique case; 'ките' is not a Russian word
+"коммит": "commit"  # freq=1771, conf=high — классическая ошибка ASR при распознавании англ. commit
+"кашированию": "кэшированию"  # freq=1, conf=high — ASR mishearing of Russian technical term (caching)
+"стронг": "strong"  # freq=3, conf=high — HTML tag <strong>, clear ASR distortion
+"транслейт": "translate"  # freq=1, conf=high — Фонетическое искажение CSS-функции translate; повторяется в технических обсуждениях
+"пайлинг": "padding"  # freq=1, conf=high — Фонетическое искажение CSS-свойства padding (отступ)
+"пронту": "промпту"  # freq=2, conf=high — Систематическая ошибка распознавания технического термина 'промпт' — встречается в нескольких фрагментах контекста разработки
+"aliasi": "alias"  # freq=1, conf=high — ASR error: artificial word-ending 'i' added, systematic in 'in aliasi cloud' contexts
+"наваг": "навык"  # freq=1, conf=high — ошибка распознавания существительного 'навык'
+"брэкпоинт": "брейкпоинт"  # freq=1, conf=high — Systematic misspelling of breakpoint; correct transliteration is брейкпоинт
+"вебап": "WebApp"  # freq=2, conf=high — искажение WebApp в речи разработчика
+"рубл": "рубль"  # freq=54, conf=medium — Incomplete currency word; correct singular form of Russian ruble
+"нотреннего": "внутреннего"  # freq=1, conf=high — phonetic ASR error: internal/внутреннего
+"дамб": "дамп"  # freq=3, conf=high — ASR error: database dump misrecognized as 'дамб' (not a real word); correct term is 'дамп'
+"монга": "MongoDB"  # freq=1, conf=high — систематическое искажение названия базы данных MongoDB в контексте обсуждения сбоев сервера
+"мерч": "merge"  # freq=40, conf=high — Искажение git-команды merge (соединение веток)
+"сплита": "Split"  # freq=5, conf=high — A/B testing platform, systematic mishearing
+"венбах": "webpack"  # freq=1, conf=high — webpack bundler, systematic misrecognition of English tool name
+"бакен": "бэкенд"  # freq=15, conf=high — Whisper mishearing of backend (бэкенд) as бакен in technical context 'backend tests'
+"хардкожные": "хардкодированные"  # freq=1, conf=high — Consistent ASR error: искажение 'hardcoded' → хардкодированные
+"пушь": "пуш"  # freq=27, conf=high — git push command
+"comet": "commit"  # freq=4, conf=high — ASR error: 'conventional comet формата' → 'conventional commit формата' (Conventional Commits specification)
+"aica": "ico"  # freq=1, conf=high — favicon.aica — очевидная ошибка распознавания расширения файла, встречается систематически
+"венвах": "в .env"  # freq=1, conf=high — венвах — фонетическое искажение конфигурационного файла .env, распознано кириллицей вместо латиницы
+"чанк": "chunk"  # freq=61, conf=high — Искажение английского термина chunk (компонент, блок кода/шаблона) — явное в контексте задач по переносу шаблонов
+"опуса": "Opus"  # freq=1, conf=high — ASR distortion of Claude Opus model name
+"naxt-multimedica": "nuxt-multimedica"  # freq=1, conf=high — systematic ASR error: 'x' misrecognized as 'xt' in repository name
+"плейсхолдерс": "placeholder"  # freq=1, conf=high — Russian phonetic spelling of English 'placeholder' (singular form, canonical term)
+"редме": "README"  # freq=30, conf=high — Mixed case corruption of canonical 'README' documentation file
+"ченч": "change"  # freq=1, conf=high — Russian phonetic spelling of English 'change' (config change context)
+"скроль": "scroll"  # freq=1, conf=high — искажение слова scroll в кириллице
+"poitner events": "pointer events"  # freq=1, conf=high — Misspelling of CSS/JS API Pointer Events
+"кримическое": "критическое"  # freq=1, conf=high — phonetic ASR error; критическое время means critical time
+"ренджа": "range"  # freq=2, conf=high — phonetic distortion of UI component type 'range'
+"филд": "field"  # freq=31, conf=high — систематическое искажение английского слова field в контексте ID полей
+"конкуреси": "concurrency"  # freq=1, conf=high — Искажение concurrency (параллелизм, конкурентность)
+"эндпойнты": "эндпоинты"  # freq=1, conf=high — Искажение русского написания англицизма 'endpoints' — правильно 'эндпоинты'
+"middle bar": "middleware"  # freq=1, conf=high — Неправильное восприятие middleware как two-word фраза
+"renovatio": "Renovation"  # freq=68, conf=high — Опечатка в имени продукта; правильная форма 'Renovation ID'
+"апе": "API"  # freq=173, conf=high — ASR misrecognition of API
+"сабтаск": "subtask"  # freq=20, conf=high — Russian transliteration of subtask, misspelled
+"завалидированы": "валидированы"  # freq=1, conf=high — incorrect prefix form, should be валидированы
+"бибоксы": "bboxes"  # freq=1, conf=high — Whisper misrecognition of technical term 'bboxes' (bounding boxes) used in computer vision
+"забилть": "забилди"  # freq=1, conf=high — Whisper miscognition of infinitive заб
+"излечение": "извлечение"  # freq=1, conf=high — ASR confusion between 'излечение' (cure) and 'извлечение' (extraction) in chunking context
+"коммиды": "коммиты"  # freq=1, conf=high — искажение при распознавании русского слова 'коммиты' (commits)
+"теп-стрит": "TypeScript"  # freq=1, conf=high — Whisper misrecognition of TypeScript (Russian phonetics + hyphenation)
+"имг": "img"  # freq=1, conf=high — ASR-искажение HTML-тега для изображений (img)
+"naxx.config": "nuxt.config"  # freq=1, conf=high — Next.js configuration file, systematic Whisper error (naxx→next)
+"ete": "e2e"  # freq=59, conf=high — Whisper confuses ETE for E2E (End-to-End) in test naming context
+"хардкорженная": "хардкодированная"  # freq=1, conf=high — Распространённая ошибка для термина 'hardcoded': множественные вхождения, явное искажение, верное написание очевидно
+"постгры": "Postgres"  # freq=1, conf=high — искажение названия СУБД Postgres
+"мастиквель": "MySQL"  # freq=1, conf=high — искажение названия СУБД MySQL
+"эвелкент": "Eloquent"  # freq=1, conf=high — Distortion of Laravel ORM name Eloquent
+"пивот": "pivot"  # freq=4, conf=high — ASR artifact for technical term 'pivot' used in database context
+"сидинг": "seeding"  # freq=39, conf=high — database data preparation, clear phonetic mishearing of English term
+"получательная": "получаемая"  # freq=1, conf=high — ASR phonetic error; 'получаемая' (received/obtained) is the correct passive participle for describing pages in context
+"модал": "modal"  # freq=189, conf=high — UI component reference, phonetic ASR error
+"стики": "sticky"  # freq=68, conf=high — CSS-свойство sticky позиционирования, систематически искажается как 'стики'. Контекст: 'размер этого стики', 'отступ стики сайдбара'
+"синглтон": "Singleton"  # freq=16, conf=high — ASR distortion of Design Pattern name Singleton, used in technical context
+"middle-wara": "middleware"  # freq=1, conf=high — ASR mishearing of middleware in technical discussion; consistent error pattern
+"inginx": "nginx"  # freq=1, conf=high — Clear ASR error: Nginx web server name
+"модок": "ModX"  # freq=49, conf=high — Colloquial shortened form of ModX
+"ноутс": "notes"  # freq=2, conf=high — распознано как 'ноутс' вместо 'notes' (заметки); контекст подтверждает техническое значение
+"пайт-тесту": "pytest"  # freq=1, conf=high — искажение названия инструмента pytest; контекст 'официальному пайт-тесту' явно указывает на фреймворк тестирования
+"хедер стики": "sticky header"  # freq=1, conf=high — ASR misheard English term 'sticky header' as Russian phonetic spelling
+"контры": "контуры"  # freq=1, conf=high — Shape/contour distortion in UI context
+"признават": "признан"  # freq=1, conf=high — Past participle of recognize, systematic speech recognition error
+"инклют": "include"  # freq=1, conf=medium — Ошибка ASR для английского термина 'include', используемого в техническом контексте разработки
+"ускругленных": "скругленных"  # freq=1, conf=high — ASR mishearing of the adjective 'скругленный' (rounded)
+"фигмион": "Figma"  # freq=1, conf=high — Consistent distortion of design tool name Figma
+"оврача": "врача"  # freq=2, conf=high — Ошибка Whisper: начальная вставка гласного в начало слова врача; повторяется в контексте врачебной страницы.
+"line-hate": "line-height"  # freq=1, conf=high — CSS property line-height consistently misrecognized as line-hate; clear Whisper error, safe replacement
+"коталог": "каталог"  # freq=1, conf=high — Whisper mishearing of 'каталог' (catalog)
+"сперна": "сперва"  # freq=1, conf=high — Whisper mishearing of 'сперва' (first)
+"кока": "кода"  # freq=4, conf=high — Систематическое искажение слова 'кода' (код) в техническом контексте сохранения кода
+"филдсета": "fieldset"  # freq=5, conf=high — HTML-элемент fieldset неправильно распознан, искажённое написание
+"докерап": "docker"  # freq=1, conf=high — ASR distortion of Docker task runner name, appears consistently in context of deployment
+"галп": "gulp"  # freq=5, conf=high — ASR distortion of Gulp task runner, recurring technical term
+"shiptune": "sheptun"  # freq=5, conf=high — app name misrecognized; shiptune is not a real word, sheptun is the canonical tool name
+"mypie": "mypy"  # freq=1, conf=high — linter tool name distorted; mypy is the correct Python type checker
+"pywrite": "pyright"  # freq=1, conf=high — type checker tool name distorted; pyright is the correct Microsoft tool
+"rough check": "ruff check"  # freq=1, conf=high — linter command misrecognized; ruff is the correct Rust-based linter
+"окалка": "локалка"  # freq=14, conf=high — систематическое искажение слова «локалка» (localhost) в разговорной речи разработчиков
+"обшибся": "ошибся"  # freq=1, conf=high — искажение глагола ошибиться, звуковая опечатка (лишняя б)
+"мейчинга": "матчинга"  # freq=1, conf=high — ASR mishearing of matching stage in data processing pipeline
+"мэтчингу": "матчингу"  # freq=1, conf=high — ASR mishearing of matching (dative case)
+"наневедении": "наведении"  # freq=1, conf=high — удвоение 'не' в произнесении — явная ошибка распознавания
+"префиксии": "префиксы"  # freq=1, conf=high — ASR error in plural form of префиксы (prefixes)
+"обняются": "обновляются"  # freq=1, conf=high — Whisper misheard 'обновляются' (DNS updates) as 'обняются'; technical context with DNS leaves no ambiguity
+"обусения": "облысения"  # freq=1, conf=high — Medical term for hair loss (alopecia), consistently misspelled in hair transplant context
+"ngx": "NGINX"  # freq=1, conf=high — ASR corruption of web server name NGINX
+"chagepti": "ChatGPT"  # freq=1, conf=high — ASR mishearing of ChatGPT model name
+"пайплайна": "pipeline"  # freq=3, conf=high — Искажение слова pipeline в кириллице при обсуждении обработки данных
+"кибининг": "keybinding"  # freq=1, conf=high — техническая ошибка: распознавание англ. термина (клавиатурное сочетание)
+"виспером": "Уиспером"  # freq=1, conf=high — Phonetic transcription of English 'whisper' in Russian instrumental case; consistent ASR error across 6 fragments
+"инсенциализируй": "инициализируй"  # freq=1, conf=high — систематическая ошибка ASR: искажение команды инициализировать
+"дисконтиниют": "дисконтируют"  # freq=1, conf=high — ASR error in verb form 'discount' (дисконтировать)
+"пламбером": "plumber"  # freq=1, conf=high — PDF processing tool name consistently misrecognized
+"медиасорса": "MediaSource"  # freq=1, conf=high — ASR artifact for the technical term MediaSource (data source entity in media system)
+"пайтан": "Python"  # freq=1, conf=high — искажение названия языка программирования
+"рошек": "крошек"  # freq=12, conf=high — Опечатка в словосочетании 'хлебные крошки'
+"хлебных рожек": "хлебных крошек"  # freq=2, conf=high — Искажение термина breadcrumbs (навигационные хлебные крошки)
+"камелькейсе": "camelCase"  # freq=1, conf=high — ASR distortion of programming naming convention camelCase
+"тейбл": "table"  # freq=1, conf=high — ASR distortion of HTML/CSS element table
+"visper turbo": "Whisper Turbo"  # freq=1, conf=high — Phonetic ASR error: model name systematically misrecognized as 'Visper' instead of 'Whisper'
+"компегирую": "компилирую"  # freq=1, conf=high — ASR confusion of 'л' and 'г' in compile verb, repeated pattern in coding context
+"колубки": "колонки"  # freq=1, conf=high — ASR error: artificial form vs. real word 'columns'
+"аппи": "API"  # freq=90, conf=high — Cyrillic transcription of API acronym
+"автолоудом": "autoload"  # freq=2, conf=high — Whisper error for technical term 'autoload'
+"греб": "grep"  # freq=7, conf=high — grep command misheard
+"инклюидим": "включим"  # freq=1, conf=high — Искажение 'include' → кириллица 'включим'
+"погенированных": "пагинированных"  # freq=2, conf=high — Искажение 'paginated' в косвенной форме
+"rlf": "CRLF"  # freq=1, conf=high — Пропущен символ — 'Carriage Return Line Feed'
+"сайдмэп": "sitemap"  # freq=1, conf=high — Искажение английского термина sitemap в кириллице
+"корлу": "curl"  # freq=2, conf=high — Искажение команды curl с падежным окончанием
+"полонты": "полноты"  # freq=1, conf=high — ASR consonant corruption in Russian word meaning 'completeness' or 'full picture'
+"пагинатс": "Paginator"  # freq=1, conf=high — Систематическое искажение технического термина Paginator
+"искруглением": "скруглением"  # freq=1, conf=high — typo/ASR error for 'rounded corners' (скруглить)
+"вертионирование": "версионирование"  # freq=1, conf=high — ASR error for 'versioning', common technical term
+"сраблоны": "шаблоны"  # freq=1, conf=high — ASR misrecognition of шаблоны (templates)
+"транскибация": "транскрипция"  # freq=1, conf=high — систематическое искажение слова транскрипция
+"ответстве": "ответе"  # freq=1006, conf=high — Malformed Russian form; correct instrumental/prepositional case is ответе
+"экшн": "экшен"  # freq=4, conf=high — Распознавание Redux Action с упущенной буквой 'е'
+"кометам": "коммитам"  # freq=1, conf=high — Git commits в дательном падеже, типичная ошибка ASR в техническом контексте
+"ди play": "display"  # freq=3, conf=high — систематическое искажение английского слова display (видимо, display)
+"чение": "чтение"  # freq=349, conf=high — Whisper dropped т: 'Чтение HTTP клиента' (reading HTTP client)
+"комис": "коммит"  # freq=20, conf=high — систематическая ошибка распознавания технического термина git commit
+"перемены окружения": "переменные окружения"  # freq=7, conf=high — переменные → перемены (похожее звучание, но перемены - реальное слово, используется фраза целиком)
+"комете": "коммите"  # freq=1, conf=high — Искажение коммита (commit), техтермин
+"интерфэйс": "интерфейс"  # freq=1, conf=high — систематическая ошибка Whisper: буква э вместо е в слове интерфейс
+"симфони": "Symfony"  # freq=11, conf=high — искажение Symfony при распознавании названия фреймворка
+"пичпи": "PHP"  # freq=8, conf=high — фонетическое искажение аббревиатуры PHP (версия PHP 8)
+"фикстора": "фикстура"  # freq=6, conf=high — распространённая ошибка распознавания слова fixture в кириллице
+"петон": "питон"  # freq=2, conf=high — systematic error for Python
+"инкопсилируть": "инкапсулировать"  # freq=1, conf=high — искажение техтермина инкапсуляция
+"утредить": "уточнить"  # freq=1, conf=high — ASR мисreading: утредить->уточнить, техтерм в контексте обсуждения изменений логики
+"яичейке": "ячейке"  # freq=1, conf=high — Cell (spreadsheet): ASR error, correct nominative form
+"линтон": "линтер"  # freq=2, conf=high — искажённое название инструмента для проверки кода
+"линтин": "линтинг"  # freq=13, conf=high — ASR truncation of 'linting'; clear technical context
+"сбускаем": "запускаем"  # freq=1, conf=high — Obvious corruption of 'launching/running' in Docker/container context
+"лагирование": "логирование"  # freq=5, conf=high — Misspelling of 'logging'; pure technical term, no ambiguity
+"бакент": "бэкенд"  # freq=1, conf=high — Systematic Whisper error for Russian 'backend' (бэкенд)
+"сседим": "сидим"  # freq=1, conf=high — удвоенная согласная: 'сседим' вместо 'сидим'
+"пробилы": "пробелы"  # freq=1, conf=high — ошибка Whisper в окончании слова
+"скулиндарь": "календарь"  # freq=1, conf=medium — искажение при распознавании слова с похожей фонетикой
+"гарматической": "грамматической"  # freq=1, conf=high — Misspelling of 'грамматический' (grammatical)
+"бработки": "обработки"  # freq=16, conf=high — Missing initial 'о' in 'обработка' (processing)
+"голюционация": "галлюцинация"  # freq=1, conf=high — ASR confused 'г' with 'гол'; Whisper hallucinations context
+"кулиционация": "галлюцинация"  # freq=1, conf=high — Systematic ASR error for hallucinations in speech about Whisper
+"кулиционаций": "галлюцинаций"  # freq=1, conf=high — Plural form of кулиционация→галлюцинация
+"моделем": "моделью"  # freq=1, conf=medium — Wrong instrumental case ending; should be моделью
+"срепт": "скрипт"  # freq=1, conf=high — common Whisper error for 'скрипт' (script), consistent technical term
+"обшипка": "ошибка"  # freq=1, conf=high — Фонетическое искажение слова 'ошибка' в контексте проверок кода
+"отсособилитие": "accessibility"  # freq=1, conf=high — Явное искажение английского термина 'accessibility' в API контексте
+"кольдебак": "callback"  # freq=1, conf=high — искажение английского термина 'callback' (обратный вызов)
+"жрифты": "шрифты"  # freq=1, conf=high — Фонетическая ошибка: ж/ш путаница. Шрифты — стандартный термин для типов шрифтов в дизайне.
+"баранирования": "бронирования"  # freq=1, conf=high — Бронирования (booking) - искажение букв б->бара, распространённая ошибка при распознавании
+"рефакторен": "рефакторинг"  # freq=1, conf=high — Рефакторинг (refactoring) - усечение окончания и ошибка гласной, типичное искажение Whisper
+"гнарируй": "генерируй"  # freq=1, conf=high — ASR artifact; генерировать is generate/produce in technical imperative
+"патом": "потом"  # freq=2, conf=high — ASR error: single vowel confusion (а→о) in common Russian word
+"лагировала": "логировала"  # freq=1, conf=high — ASR error: single vowel confusion (а→о), conjugated form of logging verb
+"браусер": "браузер"  # freq=1, conf=high — ASR error: single consonant confusion (с→з), browser is standard Russian loanword
+"медлвару": "middleware"  # freq=1, conf=high — искажение технического термина middleware
+"комитта": "коммита"  # freq=1, conf=high — ASR error: genitive case of 'коммит' (commit)
+"вонести": "внести"  # freq=1, conf=high — ASR error: 'внести' (to introduce) with initial consonant distortion
+"парамет": "параметр"  # freq=299, conf=high — Искажение русского слова параметр (parameter), встречается в контексте передачи параметров компоненту
+"даблицу": "таблицу"  # freq=1, conf=high — Типичная ошибка ASR: замена буквы в слове таблица/таблицу (table)
+"автоматно": "автоматически"  # freq=1, conf=high — Неправильная форма наречия - должно быть автоматически (automatically)
+"справило": "правило"  # freq=3, conf=high — ошибка Whisper добавила с в начало слова 'правило'
+"наобороты": "наоборот"  # freq=1, conf=high — добавлено ы в конце вместо ь в 'наоборот'
+"вью": "view"  # freq=162, conf=high — ASR ошибка при произнесении Vue.js; вью → view (фреймворк)
+"тултип": "tooltip"  # freq=13, conf=high — Систематическая ошибка распознавания английского термина (UI элемент)
+"разделейте": "разделите"  # freq=1, conf=high — искажение повелительной формы глагола 'разделить'
+"енед": "unit"  # freq=135, conf=high — Искажение 'unit' в контексте unit-тестов
+"фикстурет": "fixture"  # freq=1, conf=high — Искажение технического термина fixture (тестовое приспособление)
+"документар": "документ"  # freq=3, conf=high — Искажение 'документ' в контексте 'документ Business Case'
+"клиндарем": "календарем"  # freq=1, conf=high — ASR error: искажение слова календарь в творительном падеже
+"стегменту": "сегменту"  # freq=1, conf=high — искажение технического термина: сегмент (segment) в дательном падеже
+"скролом": "скроллом"  # freq=1, conf=high — неправильная транслитерация scroll в инструментальном падеже
+"константта": "константа"  # freq=1, conf=high — Типичная опечатка: двойная согласная в техническом термине 'константа'
+"улестрации": "иллюстрации"  # freq=1, conf=high — Фонетическое искажение слова 'иллюстрации' (ошибка в начале и середине слова)
+"лагина": "логина"  # freq=8, conf=high — ASR ошибка для слова логин; лагина не существует
+"провери": "проверь"  # freq=1163, conf=high — Искажение повелительного наклонения глагола проверь
+"фронтензия": "фронтенд"  # freq=1, conf=high — Искажение технического термина frontend; дословно присутствует в строке
+"гритичные": "критичные"  # freq=1, conf=high — Искажение прилагательного critical; дословно присутствует в строке
+"плаген": "plugin"  # freq=1, conf=high — ASR error for English term 'plugin' in code context
+"лагировать": "логировать"  # freq=2, conf=high — Whisper phonetic error; 'логировать' is Russian verb for logging
+"вытащнить": "вытащить"  # freq=1, conf=high — вытащить — достать, извлечь; пропущена буква 'и' перед 'т'
+"сверстие": "сверили"  # freq=1, conf=high — ASR error for past tense verify (check/verify)
+"правочник": "справочник"  # freq=18, conf=high — Reference book; missing 'с' in beginning
+"партиектуре": "архитектуре"  # freq=1, conf=high — Architecture; Whisper error in Russian term
+"инпоента": "endpoint"  # freq=1, conf=high — альтернативное искажение того же термина endpoint
+"клебборт": "clipboard"  # freq=1, conf=high — Whisper искажение слова clipboard в кириллице
+"варьядиков": "variadic"  # freq=1, conf=medium — Искажение английского термина variadic (параметры переменной длины)
+"варьетик": "variadic"  # freq=1, conf=medium — Искажение английского термина variadic
+"бэккэнда": "бэкенда"  # freq=1, conf=high — двойная буква К — устойчивая ошибка Whisper для слова backend/бэкенд
+"сущностья": "сущностей"  # freq=1, conf=high — искажение множественного числа косвенного падежа существительного сущность
+"продлинья": "продление"  # freq=1, conf=high — ASR distortion of Russian word 'prodlenije' (extension/prolongation)
+"продрение": "продление"  # freq=1, conf=high — систематическая ошибка распознавания термина «продление», встречается в контексте продления слотов услуг
+"comand": "command"  # freq=3, conf=high — опечатка в английском техническом термине Command Line Interface
+"логия": "логи"  # freq=44, conf=high — искажение сокращения 'логи' (логи приложения)
+"инкопсулеерам": "инкапсулировать"  # freq=1, conf=high — фонетическое искажение глагола 'инкапсулировать'
+"кладе": "Claude"  # freq=7, conf=high — Явное искажение имени Claude (AI助手)
+"клауде": "Claude"  # freq=8, conf=high — Вариант искажения Claude с окончанием
+"ряд ми": "README"  # freq=1, conf=high — Распознанный как два слова вариант README
+"изгенерирован": "сгенерирован"  # freq=2, conf=high — Prefix error: 'изгенерирован' → 'сгенерирован' (generated)
+"сохранився": "сохранился"  # freq=1, conf=high — ошибка спряжения глагола в мужском роде
+"ошибту": "ошибку"  # freq=1, conf=high — замена гласной о на у в слове ошибка
+"симфоне": "Symfony"  # freq=2, conf=high — искажение названия PHP-фреймворка Symfony
