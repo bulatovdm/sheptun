@@ -335,6 +335,12 @@ class VoiceEngine(BaseVoiceEngine):
             logger.info("Using Qwen3-ASR for recognition")
             return QwenASRRecognizer()
 
+        if settings.recognizer == "gigaam":
+            from sheptun.gigaam_onnx import GigaAMRecognizer
+
+            logger.info("Using GigaAM Multilingual CTC for recognition")
+            return GigaAMRecognizer()
+
         from sheptun.recognition import is_local_model
 
         if is_local_model(model_name):

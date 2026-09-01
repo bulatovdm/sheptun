@@ -10,3 +10,4 @@
 - [LLM Enhancement](llm-enhancement.md) — локальное причёсывание транскрипта (VoiceInk-стиль): reasoning off, галлюцинация терминов, LM Studio vs macOS 13.7, наш Whisper на MLX/GPU
 - [Анализатор логов](log-analyzer.md) — грабли прокси/стрима (непоследовательные индексы блоков, out=0/max_tokens), fallback-разбор ответа без [ ], флаг LOG_PROMPTS, не коммитить replacements.yaml от тестов
 - [Скилл-анализатор замен](skill-analyzer.md) — прогон субагентами: вывод субагента не виден в терминале, лимит 200 агентов/сессию, context_lines и min_freq не крутить
+- [Выбор ASR-модели](asr-models.md) — бенчмарк 2026-09: GigaAM Multilingual транслитерирует термины, русская v3_e2e — кандидат, sherpa-onnx мёртв на 13.7

@@ -180,6 +180,11 @@ def _load_recognizer(model_key: str) -> SpeechRecognizer | None:
 
             return QwenASRRecognizer(model_id=model or "Qwen/Qwen3-ASR-0.6B")
 
+        if engine == "gigaam":
+            from sheptun.gigaam_onnx import GigaAMRecognizer
+
+            return GigaAMRecognizer()
+
     except ImportError as e:
         console.print(f"[yellow]  Пропуск {model_key}: {e}[/yellow]")
     except Exception as e:
