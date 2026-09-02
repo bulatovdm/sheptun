@@ -9,7 +9,7 @@ import rumps
 from sheptun.audio import AudioConfig, AudioRecorder, VoiceActivityConfig
 from sheptun.commands import CommandConfigLoader, CommandParser
 from sheptun.config import get_config_path, get_replacements_path
-from sheptun.engine import BaseVoiceEngine
+from sheptun.engine import BaseVoiceEngine, create_recognizer
 from sheptun.hotkeys import HotkeyManager
 from sheptun.i18n import t
 from sheptun.keyboard import (
@@ -17,7 +17,6 @@ from sheptun.keyboard import (
     MacOSKeyboardSender,
     RemoteAwareKeyboardSender,
 )
-from sheptun.recognition import WhisperRecognizer
 from sheptun.settings import settings, setup_logging
 from sheptun.types import AppState, KeyboardSender, SpeechRecognizer
 
@@ -351,6 +350,23 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
             self.show_notification("Sheptun", t("notification_loading"))
             self._init_engine()
 
+    def _prepare_recognizer(self, recognizer: SpeechRecognizer) -> None:
+        """MLX fetches weights lazily — show download and load progress in the title."""
+        from sheptun.recognition import MLXWhisperRecognizer
+
+        if not isinstance(recognizer, MLXWhisperRecognizer):
+            return
+
+        if not recognizer.is_model_cached():
+            logger.info("MLX model not cached, downloading...")
+            self.title = t("notification_downloading")
+            recognizer.download_model(
+                on_progress=lambda pct: setattr(self, "title", f"{pct}%"),
+            )
+        self.title = t("notification_loading")
+        recognizer.warmup()
+        self.title = ""
+
     def _init_engine(self) -> None:
         if self._engine is not None:
             return
@@ -358,30 +374,8 @@ class SheptunMenubar(rumps.App):  # type: ignore[misc]
         config_path = get_config_path()
         config = CommandConfigLoader.load(config_path, get_replacements_path())
 
-        recognizer: SpeechRecognizer
-        if settings.recognizer == "apple":
-            from sheptun.apple_speech import AppleSpeechRecognizer
-
-            recognizer = AppleSpeechRecognizer()
-        elif settings.recognizer == "mlx":
-            from sheptun.recognition import MLXWhisperRecognizer
-
-            recognizer = MLXWhisperRecognizer(model_name=self._model_name)
-            if not recognizer.is_model_cached():
-                logger.info("MLX model not cached, downloading...")
-                self.title = t("notification_downloading")
-                recognizer.download_model(
-                    on_progress=lambda pct: setattr(self, "title", f"{pct}%"),
-                )
-            self.title = t("notification_loading")
-            recognizer.warmup()
-            self.title = ""
-        elif settings.recognizer == "qwen":
-            from sheptun.qwen_asr import QwenASRRecognizer
-
-            recognizer = QwenASRRecognizer()
-        else:
-            recognizer = WhisperRecognizer(model_name=self._model_name)
+        recognizer = create_recognizer(self._model_name)
+        self._prepare_recognizer(recognizer)
 
         command_parser = CommandParser(config)
         base_keyboard = MacOSKeyboardSender(use_clipboard=settings.use_clipboard)

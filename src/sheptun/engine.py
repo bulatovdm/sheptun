@@ -311,46 +311,7 @@ class VoiceEngine(BaseVoiceEngine):
 
     @staticmethod
     def _create_recognizer(model_name: str, device: str | None) -> SpeechRecognizer:
-        if settings.recognizer == "apple":
-            from sheptun.apple_speech import AppleSpeechRecognizer
-
-            logger.info("Using Apple Speech Framework for recognition")
-            return AppleSpeechRecognizer()
-
-        if settings.recognizer == "mlx":
-            from sheptun.recognition import MLXWhisperRecognizer
-
-            logger.info(f"Using MLX Whisper ({model_name}) for recognition")
-            return MLXWhisperRecognizer(model_name=model_name)
-
-        if settings.recognizer == "parakeet":
-            from sheptun.parakeet import ParakeetRecognizer
-
-            logger.info("Using Parakeet TDT for recognition")
-            return ParakeetRecognizer()
-
-        if settings.recognizer == "qwen":
-            from sheptun.qwen_asr import QwenASRRecognizer
-
-            logger.info("Using Qwen3-ASR for recognition")
-            return QwenASRRecognizer()
-
-        if settings.recognizer == "gigaam":
-            from sheptun.gigaam_onnx import GigaAMRecognizer
-
-            logger.info("Using GigaAM Multilingual CTC for recognition")
-            return GigaAMRecognizer()
-
-        from sheptun.recognition import is_local_model
-
-        if is_local_model(model_name):
-            from sheptun.recognition import HuggingFaceWhisperRecognizer
-
-            logger.info(f"Using HuggingFace Whisper ({model_name}) for recognition")
-            return HuggingFaceWhisperRecognizer(model_path=model_name, device=device)
-
-        logger.info(f"Using Whisper ({model_name}) for recognition")
-        return WhisperRecognizer(model_name=model_name, device=device)
+        return create_recognizer(model_name, device)
 
     def _on_start(self) -> None:
         self._status.start()
@@ -362,3 +323,47 @@ class VoiceEngine(BaseVoiceEngine):
     def _log(self, message: str) -> None:
         if self._debug:
             logger.debug(message)
+
+
+def create_recognizer(model_name: str, device: str | None = None) -> SpeechRecognizer:
+    """Single place that maps SHEPTUN_RECOGNIZER to a backend (CLI and menubar share it)."""
+    if settings.recognizer == "apple":
+        from sheptun.apple_speech import AppleSpeechRecognizer
+
+        logger.info("Using Apple Speech Framework for recognition")
+        return AppleSpeechRecognizer()
+
+    if settings.recognizer == "mlx":
+        from sheptun.recognition import MLXWhisperRecognizer
+
+        logger.info(f"Using MLX Whisper ({model_name}) for recognition")
+        return MLXWhisperRecognizer(model_name=model_name)
+
+    if settings.recognizer == "parakeet":
+        from sheptun.parakeet import ParakeetRecognizer
+
+        logger.info("Using Parakeet TDT for recognition")
+        return ParakeetRecognizer()
+
+    if settings.recognizer == "qwen":
+        from sheptun.qwen_asr import QwenASRRecognizer
+
+        logger.info("Using Qwen3-ASR for recognition")
+        return QwenASRRecognizer()
+
+    if settings.recognizer == "gigaam":
+        from sheptun.gigaam import GigaAMRecognizer
+
+        logger.info(f"Using GigaAM ({settings.gigaam_model}) for recognition")
+        return GigaAMRecognizer()
+
+    from sheptun.recognition import is_local_model
+
+    if is_local_model(model_name):
+        from sheptun.recognition import HuggingFaceWhisperRecognizer
+
+        logger.info(f"Using HuggingFace Whisper ({model_name}) for recognition")
+        return HuggingFaceWhisperRecognizer(model_path=model_name, device=device)
+
+    logger.info(f"Using Whisper ({model_name}) for recognition")
+    return WhisperRecognizer(model_name=model_name, device=device)

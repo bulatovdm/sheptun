@@ -115,8 +115,13 @@ class Settings:
     # Whisper initial_prompt: context hint for better recognition of domain terms.
     # Default text lives in prompts/whisper_initial.md; override via env.
     initial_prompt: str = _get_str("SHEPTUN_INITIAL_PROMPT", load_prompt("whisper_initial"))
-    # Recognizer: whisper, apple, mlx, parakeet, qwen
+    # Recognizer: whisper, apple, mlx, parakeet, qwen, gigaam
     recognizer: str = _get_str("SHEPTUN_RECOGNIZER", "whisper")
+    # GigaAM (onnx-asr): gigaam-v3-e2e-ctc/rnnt add punctuation, gigaam-v3-ctc/rnnt do not
+    gigaam_model: str = _get_str("SHEPTUN_GIGAAM_MODEL", "gigaam-v3-e2e-ctc")
+    # Runtime: mlx (Apple GPU, ~3x faster) or onnx (CPU)
+    gigaam_runtime: str = _get_str("SHEPTUN_GIGAAM_RUNTIME", "mlx")
+    gigaam_quantization: str = _get_str("SHEPTUN_GIGAAM_QUANTIZATION", "")  # onnx only: int8
     # Apple Speech locale: ru-RU, en-US, etc
     apple_locale: str = _get_str("SHEPTUN_APPLE_LOCALE", "ru-RU")
     # Remote text delivery

@@ -67,18 +67,56 @@
 
 ## Что осталось в коде
 
-- `src/sheptun/gigaam_onnx.py` — бэкенд GigaAM Multilingual CTC на onnxruntime,
-  `SHEPTUN_RECOGNIZER=gigaam`, зарегистрирован в `engine.py` и `benchmark.py`.
-  Препроцессинг повторяет `gigaam/preprocess.py`: log-mel 64, n_fft/win 400, hop 160, center=True,
-  `log(clamp(x, 1e-9, 1e9))`, greedy CTC по `tokens.txt` (blank = последний токен).
+- `src/sheptun/gigaam_onnx.py` — бэкенд GigaAM, `SHEPTUN_RECOGNIZER=gigaam`, зарегистрирован в
+  `engine.py` и `benchmark.py`. Модель выбирается `SHEPTUN_GIGAAM_MODEL` (дефолт
+  `gigaam-v3-e2e-ctc`), квант — `SHEPTUN_GIGAAM_QUANTIZATION`; зависимости в extras `.[gigaam]`.
+  Первая версия повторяла препроцессинг вручную — заменена на `onnx-asr` (см. «Второй заход»).
 - **sherpa-onnx на macOS 13.7 не работает**: их wheel собран под macOS 26.5, встроенный
   `libonnxruntime.dylib` требует символы CoreML новее нашей ОС. Поэтому инференс — на нашем
   `onnxruntime` напрямую.
 
+## Второй заход (2 сентября): GigaAM v3 e2e как рабочий бэкенд
+
+Первый замер шёл через пакет `gigaam` (torch, откатывает нам версию). Переехали на
+**`onnx-asr`** (`istupakov/onnx-asr` + веса `istupakov/gigaam-v3-onnx`, MIT): чистый onnxruntime,
+без torch/torchaudio в горячем пути, правильный препроцессинг для каждой модели зашит внутри
+(у v3 e2e он другой: `n_fft/win_length=320`, `center=false`, BPE-словарь на 257 классов).
+
+| Вариант | CER | RTF | Размер |
+|---|---:|---:|---:|
+| **gigaam-v3-e2e-ctc fp32** | **15% / 18%** | 0.068 | 886 МБ |
+| gigaam-v3-e2e-rnnt fp32 | 18% / 20% | 0.086 | 890 МБ |
+| gigaam-v3-e2e-ctc int8 | 18% / 20% | 0.046 | 225 МБ |
+
+- **int8-квантизация стоит 3 п.п. CER** — берём fp32, RTF всё равно вдвое лучше Whisper.
+- **CoreML EP не работает на macOS 13.7**: `Error computing NN outputs` при исполнении
+  CoreML-узла. Остаётся `CPUExecutionProvider` (та же семья граблей, что sherpa-onnx и Metal 3.1).
+- RNN-T по CER хуже, но чаще пишет термины латиницей (`app`, `Cloud`, `Sheptun Bench Mac`).
+
+### Обрезка тишины вредит GigaAM
+
+`_bytes_to_float_array` перед распознаванием звал `_trim_silence`. Замер по вариантам сигнала:
+
+| Сигнал | CER |
+|---|---:|
+| без trim | **15% / 18%** |
+| наш путь: trim_silence | 17% / 20% |
+| trim + паддинг 200/500 мс | 19% / 20% и 18% / 19% |
+
+Паддинг тишины обрезку не компенсирует. **Whisper к обрезке безразличен** (11%/14% с ней и без),
+поэтому `_bytes_to_float_array` получил параметр `trim`, и GigaAM зовёт его с `trim=False`.
+
+### Пост-пайплайн под GigaAM не настроен
+
+Прогон выхода `v3_e2e_ctc` через `apply_replacements → TechnicalFormatter → TextCleaner`:
+**15%/18% → 18%/20%**, то есть наши правила его портят. Часть случаев — конфликт правила с
+эталоном (`энтер`→`Enter` против эталонного «Энтер.», `комит`→`commit` против «коммит»), часть —
+правила под ошибки Whisper. Вывод прежний: переезд требует своего прогона `analyze-replacements`.
+
 ## Не проверено (следующая сессия)
 
-1. **GigaAM v3 e2e через MLX** — сейчас замер на torch/CPU в обход; есть порты
-   `al-bo/gigaam-v3-rnnt-mlx`, `aystream/GigaAM-v3-e2e-*-mlx`.
+1. **GigaAM v3 e2e через MLX** — ONNX-бэкенд считает на CPU (RTF 0.07); MLX-порты
+   (`aystream/GigaAM-v3-e2e-ctc-mlx`, `al-bo/gigaam-v3-rnnt-mlx`) должны дать GPU.
 2. **Voxtral Mini 4B Realtime** (Apache-2.0, ru, стриминг <500 мс) — через `mlx-audio`,
    ставить в отдельный venv, чтобы не тронуть наш mlx 0.29.3.
 3. **VibeVoice-ASR** (Microsoft, MIT, 50+ языков, нативный code-switching) — `mlx-community`

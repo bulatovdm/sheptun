@@ -118,7 +118,9 @@ def _check_hallucination(text: str, hallucinations: set[str]) -> bool:
     return _filter_hallucination(text, hallucinations) is None
 
 
-def _bytes_to_float_array(audio_data: bytes, sample_rate: int) -> np.ndarray[Any, Any] | None:
+def _bytes_to_float_array(
+    audio_data: bytes, sample_rate: int, trim: bool = True
+) -> np.ndarray[Any, Any] | None:
     if len(audio_data) == 0:
         return None
 
@@ -128,8 +130,10 @@ def _bytes_to_float_array(audio_data: bytes, sample_rate: int) -> np.ndarray[Any
     if sample_rate != 16000:
         audio_float32 = _resample(audio_float32, sample_rate, 16000)
 
-    audio_float32 = _trim_silence(audio_float32, sample_rate)
-    return audio_float32
+    if not trim:
+        return audio_float32
+
+    return _trim_silence(audio_float32, sample_rate)
 
 
 def _trim_silence(

@@ -36,6 +36,7 @@ class FileResult:
     rtf: float
     cer_norm: float | None = None  # CER после нормализации (без пунктуации, lowercase)
     cer_raw: float | None = None  # CER with punctuation
+    epi: float | None = None  # English Preservation Index, None если в эталоне нет латиницы
 
 
 @dataclass
@@ -66,6 +67,11 @@ class BenchmarkResult:
         values = [r.cer_raw for r in self.file_results if r.cer_raw is not None]
         return sum(values) / len(values) if values else None
 
+    @property
+    def avg_epi(self) -> float | None:
+        values = [r.epi for r in self.file_results if r.epi is not None]
+        return sum(values) / len(values) if values else None
+
 
 def _normalize(text: str) -> str:
     text = text.lower()
@@ -82,23 +88,56 @@ def _compute_cer(hypothesis: str, reference: str) -> float:
         return _cer_fallback(hypothesis, reference)
 
 
-def _cer_fallback(hypothesis: str, reference: str) -> float:
-    """Simple edit distance CER without jiwer."""
-    ref_chars = list(reference)
-    hyp_chars = list(hypothesis)
-    n = len(ref_chars)
-    if n == 0:
-        return 0.0 if len(hyp_chars) == 0 else 1.0
-
-    # Levenshtein distance
-    dp = list(range(len(hyp_chars) + 1))
-    for i, rc in enumerate(ref_chars):
+def _edit_distance(source: str, target: str) -> int:
+    """Levenshtein distance between two strings."""
+    dp = list(range(len(target) + 1))
+    for i, source_char in enumerate(source):
         new_dp = [i + 1]
-        for j, hc in enumerate(hyp_chars):
-            cost = 0 if rc == hc else 1
+        for j, target_char in enumerate(target):
+            cost = 0 if source_char == target_char else 1
             new_dp.append(min(new_dp[j] + 1, dp[j + 1] + 1, dp[j] + cost))
         dp = new_dp
-    return dp[len(hyp_chars)] / n
+    return dp[len(target)]
+
+
+def _cer_fallback(hypothesis: str, reference: str) -> float:
+    """Simple edit distance CER without jiwer."""
+    if not reference:
+        return 0.0 if not hypothesis else 1.0
+    return _edit_distance(reference, hypothesis) / len(reference)
+
+
+_LATIN_TERM = re.compile(r"[A-Za-z]+(?:[A-Za-z0-9]*)(?:[._/-][A-Za-z0-9]+)*")
+_EPI_TYPO_SCORE = 0.5
+_EPI_STUB_SCORE = 0.25
+_EPI_STUB_PREFIX = 3
+
+
+def _term_score(term: str, hypothesis_terms: list[str]) -> float:
+    """Насколько удержана латиница термина: точно / с опечаткой / огрызком / потеряна."""
+    if term in hypothesis_terms:
+        return 1.0
+
+    for candidate in hypothesis_terms:
+        if _edit_distance(term, candidate) <= 1:
+            return _EPI_TYPO_SCORE
+
+    for candidate in hypothesis_terms:
+        prefix = min(len(term), len(candidate), _EPI_STUB_PREFIX)
+        if prefix >= _EPI_STUB_PREFIX and term[:prefix] == candidate[:prefix]:
+            return _EPI_STUB_SCORE
+
+    return 0.0
+
+
+def _compute_epi(hypothesis: str, reference: str) -> float | None:
+    """English Preservation Index: доля английских терминов, дошедших латиницей."""
+    reference_terms = [t.lower() for t in _LATIN_TERM.findall(reference)]
+    if not reference_terms:
+        return None
+
+    hypothesis_terms = [t.lower() for t in _LATIN_TERM.findall(hypothesis)]
+    return sum(_term_score(t, hypothesis_terms) for t in reference_terms) / len(reference_terms)
 
 
 def _get_wav_duration(path: Path) -> float:
@@ -181,9 +220,9 @@ def _load_recognizer(model_key: str) -> SpeechRecognizer | None:
             return QwenASRRecognizer(model_id=model or "Qwen/Qwen3-ASR-0.6B")
 
         if engine == "gigaam":
-            from sheptun.gigaam_onnx import GigaAMRecognizer
+            from sheptun.gigaam import GigaAMRecognizer
 
-            return GigaAMRecognizer()
+            return GigaAMRecognizer(model_name=model)
 
     except ImportError as e:
         console.print(f"[yellow]  Пропуск {model_key}: {e}[/yellow]")
@@ -227,9 +266,11 @@ def _benchmark_model(
 
         cer_norm: float | None = None
         cer_raw: float | None = None
+        epi: float | None = None
         if text is not None and reference is not None:
             cer_norm = _compute_cer(_normalize(text), _normalize(reference))
             cer_raw = _compute_cer(text, reference)
+            epi = _compute_epi(text, reference)
 
         file_result = FileResult(
             filename=wav_path.name,
@@ -240,6 +281,7 @@ def _benchmark_model(
             rtf=rtf,
             cer_norm=cer_norm,
             cer_raw=cer_raw,
+            epi=epi,
         )
         result.file_results.append(file_result)
 
@@ -276,6 +318,14 @@ def _cer_style(cer: float) -> str:
     return "red"
 
 
+def _epi_style(epi: float) -> str:
+    if epi >= 0.8:
+        return "green"
+    if epi >= 0.5:
+        return "yellow"
+    return "red"
+
+
 def _print_summary(results: list[BenchmarkResult], has_refs: bool) -> None:
     console.print()
     table = Table(title="Итоги бенчмарка", show_header=True, header_style="bold magenta")
@@ -286,6 +336,7 @@ def _print_summary(results: list[BenchmarkResult], has_refs: bool) -> None:
     if has_refs:
         table.add_column("CER норм.", justify="right")
         table.add_column("CER точн.", justify="right")
+        table.add_column("EPI", justify="right")
     table.add_column("Файлов", justify="right")
 
     for r in results:
@@ -307,13 +358,19 @@ def _print_summary(results: list[BenchmarkResult], has_refs: bool) -> None:
                 row.append(f"[{s}]{r.avg_cer_raw:.0%}[/{s}]")
             else:
                 row.append("—")
+            if r.avg_epi is not None:
+                s = _epi_style(r.avg_epi)
+                row.append(f"[{s}]{r.avg_epi:.0%}[/{s}]")
+            else:
+                row.append("—")
         row.append(str(len(r.file_results)))
         table.add_row(*row)
 
     console.print(table)
     if has_refs:
         console.print(
-            "[dim]CER норм. = без пунктуации/регистра  |  CER точн. = с пунктуацией[/dim]"
+            "[dim]CER норм. = без пунктуации/регистра  |  CER точн. = с пунктуацией  |  "
+            "EPI = удержание английских терминов латиницей (больше — лучше)[/dim]"
         )
 
 
