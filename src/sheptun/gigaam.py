@@ -1,4 +1,5 @@
 import logging
+import re
 import threading
 import time
 from typing import Any, Protocol
@@ -13,6 +14,51 @@ logger = logging.getLogger("sheptun")
 
 _SAMPLE_RATE = 16000
 _WARMUP_SILENCE_FRAMES = 1600
+_LATIN_TERM = re.compile(r"[A-Za-z][\w.+#/-]*")
+
+
+def load_hotwords(limit: int) -> list[str]:
+    """Английские термины из replacements.yaml — подсказки декодеру, чтобы не ушли в транслит."""
+    import yaml
+
+    from sheptun.config import get_replacements_path
+
+    path = get_replacements_path()
+    if not path.exists():
+        return []
+
+    with path.open(encoding="utf-8") as f:
+        rules = yaml.safe_load(f)
+    if not isinstance(rules, dict):
+        return []
+
+    terms = (v for v in rules.values() if isinstance(v, str) and _LATIN_TERM.fullmatch(v))
+    return list(dict.fromkeys(terms))[:limit]
+
+
+class _HotwordDecoder:
+    """CTC beam search с бустом терминов: 'Gid Comiт' → 'Git commit' ценой ~90ms на фразу."""
+
+    def __init__(self, tokenizer: Any, hotwords: list[str]) -> None:
+        try:
+            from pyctcdecode import build_ctcdecoder  # type: ignore[import-untyped, attr-defined]
+        except ImportError as e:
+            raise ImportError(
+                "pyctcdecode не установлен. Установите: pip install -e '.[gigaam-mlx]'"
+            ) from e
+
+        labels = [tokenizer.id_to_piece(i) for i in range(tokenizer.get_piece_size())] + [""]
+        self._decoder = build_ctcdecoder(labels)
+        self._hotwords = hotwords
+
+    def decode(self, log_probs: np.ndarray[Any, Any]) -> str:
+        text = self._decoder.decode(
+            log_probs,
+            beam_width=settings.gigaam_beam_width,
+            hotwords=self._hotwords or None,
+            hotword_weight=settings.gigaam_hotword_weight,
+        )
+        return str(text).strip()
 
 
 class _Runtime(Protocol):
@@ -34,14 +80,36 @@ class _MlxRuntime:
 
         self._mx = mx
         self._compute_mel = compute_mel
-        self._model, self._tokenizer = load_model("rnnt" if "rnnt" in model_name else "ctc")
+        self._model_type = "rnnt" if "rnnt" in model_name else "ctc"
+        self._model, self._tokenizer = load_model(self._model_type)
+        self._decoder = self._create_decoder()
+
+    def _create_decoder(self) -> _HotwordDecoder | None:
+        if not settings.gigaam_hotwords:
+            return None
+        if self._model_type != "ctc":
+            logger.info("GigaAM hotwords работают только с CTC-моделью, биасинг выключен")
+            return None
+
+        hotwords = load_hotwords(settings.gigaam_hotwords_limit)
+        if not hotwords:
+            return None
+
+        logger.info(f"GigaAM hotwords: {len(hotwords)} терминов из replacements.yaml")
+        return _HotwordDecoder(self._tokenizer, hotwords)
 
     def transcribe(self, audio_array: np.ndarray[Any, Any]) -> str:
         mel = self._compute_mel(audio_array)
         encoded, seq_len = self._model.encode(self._mx.array(mel[np.newaxis]))
         self._mx.eval(encoded)
-        token_ids = self._model.decode(encoded, seq_len)
-        return str(self._tokenizer.decode(token_ids)).strip()
+
+        if self._decoder is None:
+            token_ids = self._model.decode(encoded, seq_len)
+            return str(self._tokenizer.decode(token_ids)).strip()
+
+        log_probs = self._model.head(encoded)
+        self._mx.eval(log_probs)
+        return self._decoder.decode(np.array(log_probs)[0, :seq_len, :])
 
 
 class _OnnxRuntime:

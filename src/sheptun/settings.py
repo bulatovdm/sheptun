@@ -122,6 +122,11 @@ class Settings:
     # Runtime: mlx (Apple GPU, ~3x faster) or onnx (CPU)
     gigaam_runtime: str = _get_str("SHEPTUN_GIGAAM_RUNTIME", "mlx")
     gigaam_quantization: str = _get_str("SHEPTUN_GIGAAM_QUANTIZATION", "")  # onnx only: int8
+    # Contextual biasing: boost English terms from replacements.yaml (mlx + CTC only)
+    gigaam_hotwords: bool = _get_bool("SHEPTUN_GIGAAM_HOTWORDS", True)
+    gigaam_hotwords_limit: int = int(_get_float("SHEPTUN_GIGAAM_HOTWORDS_LIMIT", 200))
+    gigaam_hotword_weight: float = _get_float("SHEPTUN_GIGAAM_HOTWORD_WEIGHT", 20.0)
+    gigaam_beam_width: int = int(_get_float("SHEPTUN_GIGAAM_BEAM_WIDTH", 50))
     # Apple Speech locale: ru-RU, en-US, etc
     apple_locale: str = _get_str("SHEPTUN_APPLE_LOCALE", "ru-RU")
     # Remote text delivery

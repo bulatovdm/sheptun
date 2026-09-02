@@ -63,6 +63,7 @@ gigaam = [
 ]
 gigaam-mlx = [
     "gigaam-mlx @ git+https://github.com/aystream/gigaam-mlx.git",
+    "pyctcdecode>=0.5.0",
 ]
 finetune = [
     "transformers>=4.36.0",
