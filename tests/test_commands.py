@@ -183,6 +183,20 @@ class TestReplacements:
 
         assert parser.apply_replacements("Открой Гитхаб") == "Открой GitHub"
 
+    def test_replacement_applied_once_without_chaining(self) -> None:
+        # один проход: "комид" становится "коммит" и НЕ уезжает дальше в "commit"
+        config = CommandConfig(replacements={"комид": "коммит", "коммит": "commit"})
+        parser = CommandParser(config)
+
+        assert parser.apply_replacements("создай комид") == "создай коммит"
+        assert parser.apply_replacements("создай коммит") == "создай commit"
+
+    def test_longest_key_wins(self) -> None:
+        config = CommandConfig(replacements={"гит": "git", "гит хаб": "GitHub"})
+        parser = CommandParser(config)
+
+        assert parser.apply_replacements("открой гит хаб") == "открой GitHub"
+
     def test_apply_replacements_multiple(self) -> None:
         config = CommandConfig(replacements={"питон": "Python", "докер": "docker"})
         parser = CommandParser(config)

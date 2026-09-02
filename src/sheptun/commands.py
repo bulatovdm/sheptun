@@ -11,14 +11,24 @@ PUNCTUATION_PATTERN = re.compile(r"[^\w\s]", re.UNICODE)
 SLASH_PREFIXES = ("слэш ", "слышь ", "слеш ")
 
 
-def _build_replacement_patterns(
+def _build_replacement_pattern(
     replacements: dict[str, str],
-) -> list[tuple[re.Pattern[str], str]]:
-    patterns: list[tuple[re.Pattern[str], str]] = []
-    for old, new in replacements.items():
-        pattern = re.compile(r"\b" + re.escape(old) + r"\b", re.IGNORECASE | re.UNICODE)
-        patterns.append((pattern, new))
-    return patterns
+) -> tuple[re.Pattern[str] | None, dict[str, str]]:
+    """Одна регулярка на весь словарь: каждое место заменяется ровно раз, без цепочек правил."""
+    if not replacements:
+        return None, {}
+
+    # длинные ключи первыми, иначе «гит» перехватит совпадение у «гит хаб»
+    keys = sorted(replacements, key=len, reverse=True)
+    pattern = re.compile(
+        r"\b(?:" + "|".join(re.escape(key) for key in keys) + r")\b",
+        re.IGNORECASE | re.UNICODE,
+    )
+
+    lookup: dict[str, str] = {}
+    for key, value in replacements.items():
+        lookup.setdefault(key.lower(), value)
+    return pattern, lookup
 
 
 @dataclass
@@ -101,7 +111,9 @@ class CommandConfigLoader:
 class CommandParser:
     def __init__(self, config: CommandConfig) -> None:
         self._config = config
-        self._replacement_patterns = _build_replacement_patterns(config.replacements)
+        self._replacement_pattern, self._replacement_lookup = _build_replacement_pattern(
+            config.replacements
+        )
 
     @classmethod
     def from_config_file(
@@ -111,9 +123,11 @@ class CommandParser:
         return cls(config)
 
     def apply_replacements(self, text: str) -> str:
-        for pattern, replacement in self._replacement_patterns:
-            text = pattern.sub(replacement, text)
-        return text
+        if self._replacement_pattern is None:
+            return text
+        return self._replacement_pattern.sub(
+            lambda match: self._replacement_lookup[match.group(0).lower()], text
+        )
 
     def parse(self, text: str) -> Action | None:
         normalized = self._normalize_text(text)
