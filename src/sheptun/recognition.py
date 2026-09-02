@@ -439,6 +439,20 @@ def _create_asr_pipeline(
     )
 
 
+def limit_mlx_cache() -> None:
+    """MLX кэширует GPU-буфер под каждый новый размер входа и не отдаёт его обратно.
+
+    На речи разной длины кэш растёт неограниченно (14 ГБ за 60 фраз при 1.7 ГБ реальной
+    потребности). Лимит держит его в рамках и заодно ускоряет инференс.
+    """
+    try:
+        import mlx.core as mx  # type: ignore[import-untyped]
+    except ImportError:
+        return
+
+    mx.set_cache_limit(settings.mlx_cache_limit_mb * 1024 * 1024)
+
+
 MLX_MODELS: dict[str, str] = {
     "tiny": "mlx-community/whisper-tiny",
     "base": "mlx-community/whisper-base",
@@ -483,6 +497,7 @@ class MLXWhisperRecognizer(_WarmupMixin):
         warmup_interval: float | None = None,
         initial_prompt: str | None = None,
     ) -> None:
+        limit_mlx_cache()
         self._model_repo = resolve_mlx_model(model_name)
         self._model_name = model_name
         self._hallucinations = {h.lower() for h in (hallucinations or settings.hallucinations)}

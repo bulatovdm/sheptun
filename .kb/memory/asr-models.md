@@ -65,3 +65,12 @@ turbo 64%→69% бесплатно.
 `parakeet` молча уезжали в `else` → CPU-Whisper: 5 секунд на фразу при живом виде «всё работает».
 Новый бэкенд добавлять ТОЛЬКО в `create_recognizer`; menubar зовёт её же, а UI-прогресс загрузки
 MLX живёт отдельно в `_prepare_recognizer`.
+
+## MLX течёт по GPU-кэшу, лечится `set_cache_limit`
+MLX держит отдельный GPU-буфер под КАЖДЫЙ новый размер входа и не отдаёт его: на речи разной
+длины `mx.get_cache_memory()` дорос до 14 ГБ за 60 фраз при реальной потребности 1.7 ГБ, а
+процесс в Activity Monitor показывал 20 ГБ. Важно: `ps`/RSS этого НЕ видит (128 МБ) — буферы
+Metal считаются только в physical footprint, смотреть `vmmap -summary <pid>` (регион
+IOAccelerator). Лечится `mx.set_cache_limit()` — `limit_mlx_cache()` в `recognition.py`,
+зовут оба MLX-рантайма, потолок `SHEPTUN_MLX_CACHE_LIMIT_MB` (512 МБ). Побочно ускоряет
+инференс: 80ms → 49ms на фразу.

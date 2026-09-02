@@ -115,6 +115,8 @@ class Settings:
     # Whisper initial_prompt: context hint for better recognition of domain terms.
     # Default text lives in prompts/whisper_initial.md; override via env.
     initial_prompt: str = _get_str("SHEPTUN_INITIAL_PROMPT", load_prompt("whisper_initial"))
+    # MLX GPU buffer cache ceiling; without it the cache grows with every new audio length
+    mlx_cache_limit_mb: int = int(_get_float("SHEPTUN_MLX_CACHE_LIMIT_MB", 512))
     # Recognizer: whisper, apple, mlx, parakeet, qwen, gigaam
     recognizer: str = _get_str("SHEPTUN_RECOGNIZER", "whisper")
     # GigaAM (onnx-asr): gigaam-v3-e2e-ctc/rnnt add punctuation, gigaam-v3-ctc/rnnt do not

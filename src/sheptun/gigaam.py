@@ -78,6 +78,9 @@ class _MlxRuntime:
 
         import mlx.core as mx  # type: ignore[import-untyped]
 
+        from sheptun.recognition import limit_mlx_cache
+
+        limit_mlx_cache()
         self._mx = mx
         self._compute_mel = compute_mel
         self._model_type = "rnnt" if "rnnt" in model_name else "ctc"
