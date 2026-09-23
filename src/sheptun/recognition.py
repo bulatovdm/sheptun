@@ -250,6 +250,9 @@ class _WarmupMixin:
     def start_warmup(self) -> None:
         if self._warmup_interval <= 0:
             return
+        # Warm up right away, not only after the first interval: the first real phrase
+        # otherwise pays for lazy imports (librosa compiles numba kernels, ~1s)
+        threading.Thread(target=self.warmup, daemon=True).start()
         self._schedule_warmup()
         logger.debug(f"Warmup started with interval {self._warmup_interval}s")
 

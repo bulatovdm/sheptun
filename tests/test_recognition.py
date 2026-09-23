@@ -1,4 +1,6 @@
 # pyright: reportPrivateUsage=false
+
+import threading
 from typing import Any
 
 import pytest
@@ -14,6 +16,7 @@ from sheptun.recognition import (
     _filter_hallucination,
     _has_phrase_repetition,
     _strip_hallucinations,
+    _WarmupMixin,
     resolve_mlx_model,
 )
 
@@ -372,3 +375,27 @@ class TestMLXModels:
 
     def test_resolve_mlx_model_unknown_passthrough(self) -> None:
         assert resolve_mlx_model("unknown-model") == "unknown-model"
+
+
+class _CountingWarmup(_WarmupMixin):
+    def __init__(self, interval: float) -> None:
+        self._init_warmup(interval)
+        self.warmed = threading.Event()
+
+    def _do_warmup(self) -> None:
+        self.warmed.set()
+
+
+class TestWarmupStart:
+    def test_warms_up_immediately_on_start(self) -> None:
+        recognizer = _CountingWarmup(interval=3600.0)
+        recognizer.start_warmup()
+        try:
+            assert recognizer.warmed.wait(timeout=2.0)
+        finally:
+            recognizer.stop_warmup()
+
+    def test_disabled_interval_skips_warmup(self) -> None:
+        recognizer = _CountingWarmup(interval=0.0)
+        recognizer.start_warmup()
+        assert not recognizer.warmed.wait(timeout=0.2)

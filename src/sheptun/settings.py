@@ -226,3 +226,5 @@ def setup_logging(force: bool = False) -> None:
         format="%(asctime)s [%(levelname)s] %(message)s",
         handlers=[logging.FileHandler(log_file, encoding="utf-8")],
     )
+    # numba dumps every bytecode instruction at DEBUG when librosa compiles its kernels
+    logging.getLogger("numba").setLevel(logging.WARNING)
