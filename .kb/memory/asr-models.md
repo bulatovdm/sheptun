@@ -32,12 +32,22 @@ Whisper turbo. Цена — англотермины: EPI 17% против 64% �
 `v3_e2e_rnnt` по CER хуже (18%/20%), латиницы больше, но биасинг с ним не работает.
 
 ## Hotwords-биасинг: главный рычаг по англотерминам для CTC
-`_HotwordDecoder` в `gigaam.py` — CTC beam search (`pyctcdecode`) с бустом латинских значений из
+`_BeamDecoder` в `gigaam.py` — CTC beam search (`pyctcdecode`) с бустом латинских значений из
 `replacements.yaml`. Даёт **CER 15%→13%, EPI 17%→34%** (200 терминов, вес 20), стоит ~+0.07s на
 фразу. Ручки: `SHEPTUN_GIGAAM_HOTWORDS`, `..._LIMIT` (50→EPI 28%, 200→34%, 652→41% но 454ms),
 `..._HOTWORD_WEIGHT`, `..._BEAM_WIDTH`. Работает только mlx+CTC (нужны `model.head(encoded)`).
 Порядок важен: **сначала биасинг, потом сбор словаря замен** — биасинг меняет распределение
 ошибок, иначе прогон `analyze-replacements` придётся делать дважды.
+
+## KenLM в том же beam search — лучший рычаг (2026-09-23)
+`SHEPTUN_GIGAAM_LM_PATH` + `sheptun build-lm` (`lm_corpus.py`, `ngram_lm.py`; утилиты KenLM —
+`./scripts/build_kenlm.sh` → `tools/kenlm/bin`). На 100 фразах **LM + 652 hotwords, вес 30:
+CER 7%/9%, EPI 49%, 95ms** против greedy 9%/11%, EPI 31% (одни hotwords-652 — ~1с декодинга).
+LM удешевляет hotwords: `unk_score_offset` не масштабируется `alpha` и режет гипотезы вне словаря.
+Плато `alpha` 0.2–0.5, `unk_offset` -5. Слова нормализуются одинаково при обучении и скоринге
+(`NormalizedLanguageModel`). Корпус — `Recognized` через ТЕКУЩИЙ `replacements.yaml` +
+`verification.db`, пересказы эталонов тест-сета (≥70% слов) вырезаны.
+Связано: `docs/asr-benchmark-2026-09.md` (третий заход), `src/sheptun/gigaam.py` (`_BeamDecoder`).
 
 ## EPI — метрика удержания латиницы, CER её маскирует
 `_compute_epi` в `benchmark.py` + колонка в `sheptun benchmark`: 1.0 канон, 0.5 опечатка,
