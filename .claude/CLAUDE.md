@@ -36,6 +36,10 @@ sheptun analyze-replacements --max-iterations 5 --apply     # process N batches,
 sheptun analyze-replacements --since 2026-06-01 --dry-run   # count windows for a date range
 sheptun analyze-replacements --reset-state                  # clear the incremental checkpoint
 
+# KenLM n-gram LM for the GigaAM decoder
+./scripts/build_kenlm.sh    # once: lmplz/build_binary → tools/kenlm/bin (brew cmake boost)
+sheptun build-lm            # → models/gigaam-lm.bin
+
 ```
 
 ## Architecture
@@ -59,6 +63,9 @@ src/sheptun/
 ├── i18n.py         # Russian translations
 ├── verification.py # Transcript verification via Claude Agent SDK
 ├── log_analyzer.py # LLM log analysis → replacement suggestions (Anthropic SDK)
+├── gigaam.py       # GigaAM recognizer; CTC beam search with hotwords + KenLM
+├── lm_corpus.py    # Corpus for the GigaAM LM: log + current replacements + verification.db
+├── ngram_lm.py     # KenLM training (lmplz) + normalized LM scorer for pyctcdecode
 ├── prompts/        # Prompt templates as .md files + load_prompt() loader
 ├── app_builder.py  # macOS .app bundle builder
 └── types.py        # Protocols, dataclasses, enums (AppState)
@@ -74,6 +81,8 @@ SHEPTUN_MODEL=medium         # tiny, base, small, medium, large
 SHEPTUN_SILENCE_DURATION=0.3 # Pause to detect end of phrase
 SHEPTUN_DEBUG=false
 ```
+
+GigaAM beam search (mlx + CTC only): `SHEPTUN_GIGAAM_HOTWORDS` / `_HOTWORDS_LIMIT` / `_HOTWORD_WEIGHT`, KenLM via `SHEPTUN_GIGAAM_LM_PATH` (+ `_LM_ALPHA` 0.3, `_LM_BETA` 1.0, `_LM_UNK_OFFSET` -5). Best on the 100-phrase testset: LM + 652 hotwords, weight 30 → CER 7%/9%, EPI 49%, ~95ms (greedy 9%/11%, EPI 31%) (see `docs/asr-benchmark-2026-09.md`).
 
 Command config: `./sheptun.yaml` or `~/.config/sheptun/commands.yaml`
 

@@ -2,6 +2,7 @@ import logging
 import re
 import threading
 import time
+from pathlib import Path
 from typing import Any, Protocol
 
 import numpy as np
@@ -36,19 +37,50 @@ def load_hotwords(limit: int) -> list[str]:
     return list(dict.fromkeys(terms))[:limit]
 
 
-class _HotwordDecoder:
-    """CTC beam search с бустом терминов: 'Gid Comiт' → 'Git commit' ценой ~90ms на фразу."""
+def load_language_model() -> Any:
+    """KenLM from SHEPTUN_GIGAAM_LM_PATH, or None when it is not configured or not built."""
+    if not settings.gigaam_lm_path:
+        return None
 
-    def __init__(self, tokenizer: Any, hotwords: list[str]) -> None:
+    path = Path(settings.gigaam_lm_path).expanduser()
+    if not path.exists():
+        logger.warning(f"GigaAM LM не найдена: {path} (соберите: sheptun build-lm)")
+        return None
+
+    try:
+        from sheptun.ngram_lm import load_language_model as load_kenlm
+    except ImportError as e:
+        raise ImportError(
+            "pyctcdecode/kenlm не установлены. Установите: pip install -e '.[gigaam-mlx]'"
+        ) from e
+
+    logger.info(f"GigaAM LM: {path}")
+    return load_kenlm(
+        path,
+        alpha=settings.gigaam_lm_alpha,
+        beta=settings.gigaam_lm_beta,
+        unk_score_offset=settings.gigaam_lm_unk_offset,
+    )
+
+
+class _BeamDecoder:
+    """CTC beam search с бустом терминов и n-gram LM: 'Gid Comiт' → 'Git commit'.
+
+    Hotwords в одиночку стоят ~160ms на фразу; LM отсекает лишние гипотезы, и вместе они
+    укладываются в ~20ms.
+    """
+
+    def __init__(self, tokenizer: Any, hotwords: list[str], language_model: Any) -> None:
         try:
-            from pyctcdecode import build_ctcdecoder  # type: ignore[import-untyped, attr-defined]
+            from pyctcdecode.alphabet import Alphabet  # type: ignore[import-untyped]
+            from pyctcdecode.decoder import BeamSearchDecoderCTC  # type: ignore[import-untyped]
         except ImportError as e:
             raise ImportError(
                 "pyctcdecode не установлен. Установите: pip install -e '.[gigaam-mlx]'"
             ) from e
 
         labels = [tokenizer.id_to_piece(i) for i in range(tokenizer.get_piece_size())] + [""]
-        self._decoder = build_ctcdecoder(labels)
+        self._decoder = BeamSearchDecoderCTC(Alphabet.build_alphabet(labels), language_model)
         self._hotwords = hotwords
 
     def decode(self, log_probs: np.ndarray[Any, Any]) -> str:
@@ -87,19 +119,26 @@ class _MlxRuntime:
         self._model, self._tokenizer = load_model(self._model_type)
         self._decoder = self._create_decoder()
 
-    def _create_decoder(self) -> _HotwordDecoder | None:
-        if not settings.gigaam_hotwords:
+    def _create_decoder(self) -> _BeamDecoder | None:
+        if not (settings.gigaam_hotwords or settings.gigaam_lm_path):
             return None
         if self._model_type != "ctc":
-            logger.info("GigaAM hotwords работают только с CTC-моделью, биасинг выключен")
+            logger.info("GigaAM hotwords и LM работают только с CTC-моделью, beam search выключен")
             return None
 
+        hotwords = self._load_hotwords()
+        language_model = load_language_model()
+        if not hotwords and language_model is None:
+            return None
+        return _BeamDecoder(self._tokenizer, hotwords, language_model)
+
+    @staticmethod
+    def _load_hotwords() -> list[str]:
+        if not settings.gigaam_hotwords:
+            return []
         hotwords = load_hotwords(settings.gigaam_hotwords_limit)
-        if not hotwords:
-            return None
-
         logger.info(f"GigaAM hotwords: {len(hotwords)} терминов из replacements.yaml")
-        return _HotwordDecoder(self._tokenizer, hotwords)
+        return hotwords
 
     def transcribe(self, audio_array: np.ndarray[Any, Any]) -> str:
         mel = self._compute_mel(audio_array)

@@ -129,6 +129,11 @@ class Settings:
     gigaam_hotwords_limit: int = int(_get_float("SHEPTUN_GIGAAM_HOTWORDS_LIMIT", 200))
     gigaam_hotword_weight: float = _get_float("SHEPTUN_GIGAAM_HOTWORD_WEIGHT", 20.0)
     gigaam_beam_width: int = int(_get_float("SHEPTUN_GIGAAM_BEAM_WIDTH", 50))
+    # KenLM n-gram LM in the same beam search (mlx + CTC only); build with `sheptun build-lm`
+    gigaam_lm_path: str | None = _get_optional_str("SHEPTUN_GIGAAM_LM_PATH")
+    gigaam_lm_alpha: float = _get_float("SHEPTUN_GIGAAM_LM_ALPHA", 0.3)
+    gigaam_lm_beta: float = _get_float("SHEPTUN_GIGAAM_LM_BETA", 1.0)
+    gigaam_lm_unk_offset: float = _get_float("SHEPTUN_GIGAAM_LM_UNK_OFFSET", -5.0)
     # Apple Speech locale: ru-RU, en-US, etc
     apple_locale: str = _get_str("SHEPTUN_APPLE_LOCALE", "ru-RU")
     # Remote text delivery

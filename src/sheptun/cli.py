@@ -1524,5 +1524,91 @@ def record_testset(
         _hint("Запустите бенчмарк: sheptun benchmark --testset")
 
 
+DEFAULT_LM_OUTPUT = Path("models/gigaam-lm.bin")
+DEFAULT_LM_ORDER = 4
+DEFAULT_KENLM_BIN = Path("tools/kenlm/bin")
+
+
+def _find_kenlm_binary(name: str, kenlm_bin: Path | None) -> Path | None:
+    import shutil
+
+    for directory in (kenlm_bin, DEFAULT_KENLM_BIN):
+        if directory is not None and (directory / name).exists():
+            return directory / name
+    found = shutil.which(name)
+    return Path(found) if found else None
+
+
+@app.command()
+def build_lm(
+    output: Annotated[
+        Path,
+        typer.Option("--output", "-o", help="Куда положить бинарную модель KenLM"),
+    ] = DEFAULT_LM_OUTPUT,
+    order: Annotated[
+        int,
+        typer.Option("--order", help="Порядок n-грамм", min=2, max=6),
+    ] = DEFAULT_LM_ORDER,
+    kenlm_bin: Annotated[
+        Path | None,
+        typer.Option(
+            "--kenlm-bin",
+            help="Папка с lmplz и build_binary (по умолчанию tools/kenlm/bin, затем PATH)",
+            exists=True,
+            file_okay=False,
+        ),
+    ] = None,
+) -> None:
+    """Собрать n-gram LM для декодера GigaAM из лога, verification.db и replacements.yaml.
+
+    Фразы из лога прогоняются через текущий replacements.yaml, фразы тест-сета
+    исключаются. Подключение: SHEPTUN_GIGAAM_LM_PATH=<output> в .env.
+    """
+    from sheptun.commands import CommandParser
+    from sheptun.lm_corpus import (
+        build_corpus,
+        read_recognized_phrases,
+        read_replacement_values,
+        read_testset_sentences,
+        read_verified_transcripts,
+    )
+    from sheptun.ngram_lm import train_language_model
+
+    lmplz = _find_kenlm_binary("lmplz", kenlm_bin)
+    build_binary = _find_kenlm_binary("build_binary", kenlm_bin)
+    if lmplz is None or build_binary is None:
+        _error("Не найдены lmplz/build_binary из KenLM")
+        _hint("Соберите: ./scripts/build_kenlm.sh (нужны brew install cmake boost)")
+        raise typer.Exit(1)
+
+    if not settings.log_file.exists():
+        _error(f"Лог не найден: {settings.log_file}")
+        raise typer.Exit(1)
+
+    replacements_path = get_replacements_path()
+    parser = CommandParser.from_config_file(get_config_path(), replacements_path)
+    extra = [
+        *read_verified_transcripts(settings.dataset_path / "verification.db"),
+        *read_replacement_values(replacements_path),
+    ]
+    excluded = read_testset_sentences(settings.dataset_path / "testset" / "references.jsonl")
+
+    _info(f"Корпус: {settings.log_file} + verification.db + {replacements_path.name}")
+    corpus = build_corpus(
+        read_recognized_phrases(settings.log_file), parser.apply_replacements, extra, excluded
+    )
+    if not corpus:
+        _error("Корпус пуст")
+        raise typer.Exit(1)
+
+    words = sum(len(sentence.split()) for sentence in corpus)
+    _info(f"Предложений: {len(corpus)}, слов: {words}. Обучение {order}-граммной модели…")
+    train_language_model(corpus, output, order, lmplz, build_binary)
+
+    size_mb = output.stat().st_size / 1024 / 1024
+    _success(f"Модель: {output} ({size_mb:.0f} МБ)")
+    _hint(f"Подключение: SHEPTUN_GIGAAM_LM_PATH={output} в .env, затем sheptun restart")
+
+
 if __name__ == "__main__":
     app()

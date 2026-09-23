@@ -60,6 +60,9 @@ dataset/
 # Fine-tuned models
 models/
 
+# KenLM sources and binaries (scripts/build_kenlm.sh)
+tools/kenlm/
+
 # OS
 .DS_Store
 Thumbs.db
