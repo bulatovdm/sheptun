@@ -180,6 +180,12 @@ module = [
 ]
 ignore_missing_imports = true
 
+# mlx ships partial stubs (no nn layers, no value_and_grad): treat it as untyped
+[[tool.mypy.overrides]]
+module = ["mlx.*"]
+follow_imports = "skip"
+ignore_missing_imports = true
+
 [tool.pyright]
 pythonVersion = "3.11"
 venvPath = "."

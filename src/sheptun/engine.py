@@ -11,6 +11,7 @@ from sheptun.keyboard import MacOSKeyboardSender
 from sheptun.recognition import WhisperRecognizer
 from sheptun.settings import settings
 from sheptun.status import ConsoleStatusIndicator, SimpleStatusIndicator
+from sheptun.term_tagger import create_term_corrector
 from sheptun.text_cleanup import TextCleaner
 from sheptun.types import (
     Action,
@@ -48,6 +49,7 @@ class BaseVoiceEngine:
         self._vad_config = vad_config
         self._recorder: ContinuousAudioRecorder | None = None
         self._dataset_recorder = DatasetRecorder() if record_dataset else None
+        self._corrector = create_term_corrector(settings.tagger_path, settings.tagger_threshold)
         self._formatter = TechnicalFormatter()
         self._cleaner = TextCleaner()
         self._state = AppState.IDLE
@@ -117,9 +119,7 @@ class BaseVoiceEngine:
         try:
             result = self._recognizer.recognize(audio_data, self.sample_rate)
             if result and result.text:
-                text = self._command_parser.apply_replacements(result.text)
-                text = self._formatter.format(text)
-                text = self._cleaner.clean(text)
+                text = self._postprocess(result.text)
                 self._log(f"Recognized: '{text}'")
                 self._save_to_dataset(audio_data, result.text)
                 action = self._command_parser.parse(text)
@@ -127,6 +127,13 @@ class BaseVoiceEngine:
                     self._execute_action(action)
         except Exception as e:
             self._log(f"Recognition error: {e}")
+
+    def _postprocess(self, text: str) -> str:
+        if self._corrector is not None:
+            text = self._corrector.correct(text)
+        text = self._command_parser.apply_replacements(text)
+        text = self._formatter.format(text)
+        return self._cleaner.clean(text)
 
     def _on_start(self) -> None:
         self._status.listening()
@@ -190,9 +197,7 @@ class BaseVoiceEngine:
                 self._resume_listening()
                 return
 
-            text = self._command_parser.apply_replacements(result.text)
-            text = self._formatter.format(text)
-            text = self._cleaner.clean(text)
+            text = self._postprocess(result.text)
             if text != result.text:
                 self._log(f"Recognized: '{result.text}' -> '{text}'")
             else:

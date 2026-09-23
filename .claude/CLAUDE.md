@@ -39,6 +39,7 @@ sheptun analyze-replacements --reset-state                  # clear the incremen
 # KenLM n-gram LM for the GigaAM decoder
 ./scripts/build_kenlm.sh    # once: lmplz/build_binary → tools/kenlm/bin (brew cmake boost)
 sheptun build-lm            # → models/gigaam-lm.bin
+sheptun train-tagger        # term-correcting network (MLX, ~13 min) → models/term-tagger
 
 ```
 
@@ -66,12 +67,15 @@ src/sheptun/
 ├── gigaam.py       # GigaAM recognizer; CTC beam search with hotwords + KenLM
 ├── lm_corpus.py    # Corpus for the GigaAM LM: log + current replacements + verification.db
 ├── ngram_lm.py     # KenLM training (lmplz) + normalized LM scorer for pyctcdecode
+├── term_tagger.py  # Term tagger: per-word KEEP/DELETE/term labels → corrected text (no MLX)
+├── tagger_data.py  # Tagger examples: rule matches in the log + synthetic ASR distortions
+├── tagger_model.py # Tagger network (char-CNN + Transformer, MLX) and its training loop
 ├── prompts/        # Prompt templates as .md files + load_prompt() loader
 ├── app_builder.py  # macOS .app bundle builder
 └── types.py        # Protocols, dataclasses, enums (AppState)
 ```
 
-**Data flow:** Microphone → VAD → Whisper → Hallucination filter → Spell correction → Word replacements (`replacements.yaml`) → Technical formatting (`formatting.py`) → Text cleanup (`text_cleanup.py`, collapse duplicates) → CommandParser → KeyboardSender
+**Data flow:** Microphone → VAD → ASR (GigaAM + KenLM + hotwords) → Hallucination filter → Term tagger (`term_tagger.py`, optional) → Word replacements (`replacements.yaml`) → Technical formatting (`formatting.py`) → Text cleanup (`text_cleanup.py`, fillers + duplicates) → CommandParser → KeyboardSender
 
 ## Configuration
 
@@ -83,6 +87,8 @@ SHEPTUN_DEBUG=false
 ```
 
 GigaAM beam search (mlx + CTC only): `SHEPTUN_GIGAAM_HOTWORDS` / `_HOTWORDS_LIMIT` / `_HOTWORD_WEIGHT`, KenLM via `SHEPTUN_GIGAAM_LM_PATH` (+ `_LM_ALPHA` 0.3, `_LM_BETA` 1.0, `_LM_UNK_OFFSET` -5). Best on the 100-phrase testset: LM + 652 hotwords, weight 30 → CER 7%/9%, EPI 49%, ~95ms (greedy 9%/11%, EPI 31%) (see `docs/asr-benchmark-2026-09.md`).
+
+Term tagger: `SHEPTUN_TAGGER_PATH=models/term-tagger` (+ `SHEPTUN_TAGGER_THRESHOLD` 0.5) — a 2.3M-param MLX network that picks a term from the replacement values for each ASR-mangled word (~1ms/phrase). Retrain after new replacement rules.
 
 Command config: `./sheptun.yaml` or `~/.config/sheptun/commands.yaml`
 

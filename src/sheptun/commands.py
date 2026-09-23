@@ -129,6 +129,15 @@ class CommandParser:
             lambda match: self._replacement_lookup[match.group(0).lower()], text
         )
 
+    def find_replacements(self, text: str) -> list[tuple[int, int, str]]:
+        """Where apply_replacements would fire: (start, end, replacement)."""
+        if self._replacement_pattern is None:
+            return []
+        return [
+            (m.start(), m.end(), self._replacement_lookup[m.group(0).lower()])
+            for m in self._replacement_pattern.finditer(text)
+        ]
+
     def parse(self, text: str) -> Action | None:
         normalized = self._normalize_text(text)
 

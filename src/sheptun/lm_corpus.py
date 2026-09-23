@@ -77,7 +77,7 @@ def read_testset_sentences(references_path: Path) -> set[str]:
     return {s for s in sentences if len(s.split()) >= _MIN_LEAK_WORDS}
 
 
-class _LeakFilter:
+class LeakFilter:
     """Spots corpus sentences that repeat a benchmark reference, even with ASR variations."""
 
     def __init__(self, references: set[str]) -> None:
@@ -108,6 +108,6 @@ def build_corpus(
     """Normalized sentences; anything repeating a benchmark reference is dropped."""
     texts = [apply_replacements(p) for p in phrases]
     texts.extend(extra_texts)
-    leak_filter = _LeakFilter(excluded)
+    leak_filter = LeakFilter(excluded)
     corpus = (s for text in texts for s in normalize_sentences(text))
     return [s for s in corpus if not leak_filter.is_leak(s)]

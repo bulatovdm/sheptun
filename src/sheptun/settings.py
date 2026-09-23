@@ -134,6 +134,9 @@ class Settings:
     gigaam_lm_alpha: float = _get_float("SHEPTUN_GIGAAM_LM_ALPHA", 0.3)
     gigaam_lm_beta: float = _get_float("SHEPTUN_GIGAAM_LM_BETA", 1.0)
     gigaam_lm_unk_offset: float = _get_float("SHEPTUN_GIGAAM_LM_UNK_OFFSET", -5.0)
+    # Term tagger after ASR ('мидлвэр' → 'middleware'); train with `sheptun train-tagger`
+    tagger_path: str | None = _get_optional_str("SHEPTUN_TAGGER_PATH")
+    tagger_threshold: float = _get_float("SHEPTUN_TAGGER_THRESHOLD", 0.5)
     # Apple Speech locale: ru-RU, en-US, etc
     apple_locale: str = _get_str("SHEPTUN_APPLE_LOCALE", "ru-RU")
     # Remote text delivery

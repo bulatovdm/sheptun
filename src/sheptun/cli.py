@@ -1610,5 +1610,79 @@ def build_lm(
     _hint(f"Подключение: SHEPTUN_GIGAAM_LM_PATH={output} в .env, затем sheptun restart")
 
 
+DEFAULT_TAGGER_OUTPUT = Path("models/term-tagger")
+DEFAULT_TAGGER_EPOCHS = 30
+TAGGER_VALIDATION_SHARE = 0.05
+TAGGER_SEED = 13
+
+
+@app.command()
+def train_tagger(
+    output: Annotated[
+        Path,
+        typer.Option("--output", "-o", help="Папка для модели"),
+    ] = DEFAULT_TAGGER_OUTPUT,
+    epochs: Annotated[
+        int,
+        typer.Option("--epochs", "-e", help="Сколько проходов по данным", min=1),
+    ] = DEFAULT_TAGGER_EPOCHS,
+) -> None:
+    """Обучить нейросеть-корректор терминов (MLX, ~10 минут на 30 эпох).
+
+    Примеры: фразы из лога, где сработали правила replacements.yaml, и чистые фразы
+    с нарочно искажёнными терминами. Фразы тест-сета исключаются.
+    Подключение: SHEPTUN_TAGGER_PATH=<output> в .env, затем sheptun restart.
+    """
+    import random
+
+    from sheptun.commands import CommandConfigLoader, CommandParser
+    from sheptun.lm_corpus import (
+        read_recognized_phrases,
+        read_testset_sentences,
+        read_verified_transcripts,
+    )
+    from sheptun.tagger_data import ExampleBuilder, TermVocabulary, build_examples
+
+    try:
+        from sheptun.tagger_model import EpochReport
+        from sheptun.tagger_model import train_tagger as run_training
+    except ImportError as e:
+        _error(f"MLX не установлен: {e}")
+        raise typer.Exit(1) from None
+
+    if not settings.log_file.exists():
+        _error(f"Лог не найден: {settings.log_file}")
+        raise typer.Exit(1)
+
+    config = CommandConfigLoader.load(get_config_path(), get_replacements_path())
+    parser = CommandParser(config)
+    vocab = TermVocabulary(config.replacements)
+    rng = random.Random(TAGGER_SEED)
+    excluded = read_testset_sentences(settings.dataset_path / "testset" / "references.jsonl")
+    builder = ExampleBuilder(vocab, parser.find_replacements, excluded, rng)
+
+    _info(f"Сборка примеров из {settings.log_file} и verification.db…")
+    examples = build_examples(
+        read_recognized_phrases(settings.log_file),
+        parser.apply_replacements,
+        read_verified_transcripts(settings.dataset_path / "verification.db"),
+        builder,
+    )
+    rng.shuffle(examples)
+    n_validation = int(len(examples) * TAGGER_VALIDATION_SHARE)
+    validation, train = examples[:n_validation], examples[n_validation:]
+    _info(f"Примеров: {len(train)} + {len(validation)} проверочных, терминов: {len(vocab.targets)}")
+
+    def report(epoch: EpochReport) -> None:
+        console.print(
+            f"  эпоха {epoch.epoch}/{epochs}: loss {epoch.loss:.4f}, "
+            f"точность {epoch.precision:.0%}, полнота {epoch.recall:.0%}"
+        )
+
+    run_training(train, validation, vocab.targets, output, epochs, report)
+    _success(f"Модель: {output}")
+    _hint(f"Подключение: SHEPTUN_TAGGER_PATH={output} в .env, затем sheptun restart")
+
+
 if __name__ == "__main__":
     app()
