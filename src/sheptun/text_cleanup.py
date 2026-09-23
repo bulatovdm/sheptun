@@ -67,6 +67,34 @@ def _collapse_spoken_symbol_before_symbol(text: str) -> str:
     return text
 
 
+# Звуки-паузы, которые GigaAM записывает дословно: «э-э», «а-а», «и-и-и», «м-м-м», «ээ», «хмм».
+# Одиночные «а»/«э»/«и» не трогаем — это союзы и междометия; «ИИ» — искусственный интеллект.
+_FILLER = re.compile(
+    r"(?<![\w-])(?:([аэиму])\1*(?:-\1+)+-?|э{2,}|а{2,}|и{3,}|м{2,}|х+м+|а-э|э-а)(?![\w-])"
+    r"([,.!?…]?)\s*",
+    re.IGNORECASE,
+)
+_SENTENCE_END = (".", "!", "?")
+
+
+def _remove_fillers(text: str) -> str:
+    """«А-а, смотри» → «Смотри», «плавные, э-э, ну» → «плавные, ну», «Хмм. Ну» → «Ну»."""
+
+    def repl(match: re.Match[str]) -> str:
+        before = text[: match.start()].rstrip()
+        starts_sentence = not before or before.endswith(_SENTENCE_END)
+        punctuation = match.group(2)
+        if not starts_sentence and punctuation in _SENTENCE_END:
+            return punctuation + " "
+        if starts_sentence and text[match.end() : match.end() + 1].islower():
+            return "\x01"
+        return ""
+
+    cleaned = _FILLER.sub(repl, text)
+    cleaned = re.sub(r"\x01(\w)", lambda m: m.group(1).upper(), cleaned).replace("\x01", "")
+    return re.sub(r",\s*(?=[.!?]|$)", "", cleaned)
+
+
 def _collapse_repeated_words(text: str) -> str:
     """«коммит коммит»→«коммит» (регистронезависимо, по границам слов)."""
     return re.sub(
@@ -96,6 +124,7 @@ class TextCleaner:
 
     def _build_rules(self) -> list[CleanupRule]:
         return [
+            CleanupRule("fillers", _remove_fillers),
             CleanupRule("spoken_symbol_before_symbol", _collapse_spoken_symbol_before_symbol),
             CleanupRule("duplicate_punctuation", _collapse_duplicate_punctuation),
             CleanupRule("repeated_words", _collapse_repeated_words),

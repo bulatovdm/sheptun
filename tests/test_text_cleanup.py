@@ -105,3 +105,28 @@ class TestExtensibility:
         # правила доступны как список для расширения
         assert len(cleaner.rules) > 0
         assert all(hasattr(r, "name") for r in cleaner.rules)
+
+
+class TestFillers:
+    """Звуки-паузы, которые GigaAM записывает дословно."""
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("А-а, смотри, прежде чем идти дальше.", "Смотри, прежде чем идти дальше."),
+            ("плавные, э-э, ну, короче", "плавные, ну, короче"),
+            ("Хмм. Ну ладно.", "Ну ладно."),
+            ("Сделай так, э-э.", "Сделай так."),
+            ("Короче, ммм, не знаю", "Короче, не знаю"),
+            ("сопоставить их, и-и-и м-м-м и ещё раз", "сопоставить их, и ещё раз"),
+        ],
+    )
+    def test_removes_fillers(self, cleaner: TextCleaner, text: str, expected: str) -> None:
+        assert cleaner.clean(text) == expected
+
+    @pytest.mark.parametrize(
+        "text",
+        ["А ты проверил?", "Э, погоди.", "ИИ сделает", "ИИ-агент сделает", "Ка-как мы можем?"],
+    )
+    def test_keeps_real_words(self, cleaner: TextCleaner, text: str) -> None:
+        assert cleaner.clean(text) == text
