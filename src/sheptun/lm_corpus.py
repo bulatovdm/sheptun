@@ -17,8 +17,8 @@ import yaml
 _EDGE_PUNCTUATION = ".,!?;:«»\"'()[]…—–-"
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?…])\s+")
 _RECOGNIZED_LINE = re.compile(r"Recognized: '(.*)'$")
-# Replacement logging reuses the "Recognized" prefix: "'raw' -> 'replaced'"
-_REPLACEMENT_MARKER = "' -> '"
+# When post-processing changed the text the engine logs "'raw' -> 'processed'"
+_PROCESSED_SUFFIX = re.compile(r"' -> '.*$")
 # Shorter reference sentences ("Сохранить.") are too common to count as a leak
 _MIN_LEAK_WORDS = 3
 # A corpus sentence holding this share of a reference's words is a paraphrase of it
@@ -42,8 +42,8 @@ def read_recognized_phrases(log_path: Path) -> Iterator[str]:
     with log_path.open(encoding="utf-8", errors="ignore") as f:
         for line in f:
             match = _RECOGNIZED_LINE.search(line.rstrip())
-            if match and _REPLACEMENT_MARKER not in match.group(1):
-                yield match.group(1)
+            if match:
+                yield _PROCESSED_SUFFIX.sub("", match.group(1))
 
 
 def read_verified_transcripts(db_path: Path) -> Iterator[str]:

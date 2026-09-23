@@ -35,15 +35,15 @@ class TestNormalize:
 
 
 class TestReaders:
-    def test_recognized_phrases_skip_replacement_lines(self, tmp_path: Path) -> None:
+    def test_recognized_phrases_take_raw_side_of_processed_lines(self, tmp_path: Path) -> None:
         log = tmp_path / "sheptun.log"
         log.write_text(
-            "2026-09-01 10:00:00,000 [INFO] Recognized: 'Сделай гид пуш.'\n"
-            "2026-09-01 10:00:00,001 [INFO] Recognized: 'гид' -> 'git'\n"
+            "2026-09-01 10:00:00,000 [INFO] Recognized: 'Открой файл.'\n"
+            "2026-09-01 10:00:00,001 [INFO] Recognized: 'Сделай гид пуш.' -> 'Сделай git push.'\n"
             "2026-09-01 10:00:00,002 [DEBUG] Clipboard send complete\n",
             encoding="utf-8",
         )
-        assert list(read_recognized_phrases(log)) == ["Сделай гид пуш."]
+        assert list(read_recognized_phrases(log)) == ["Открой файл.", "Сделай гид пуш."]
 
     def test_verified_transcripts_skip_hallucinations(self, tmp_path: Path) -> None:
         db_path = tmp_path / "verification.db"
