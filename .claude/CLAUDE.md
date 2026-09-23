@@ -86,7 +86,7 @@ SHEPTUN_SILENCE_DURATION=0.3 # Pause to detect end of phrase
 SHEPTUN_DEBUG=false
 ```
 
-GigaAM beam search (mlx + CTC only): `SHEPTUN_GIGAAM_HOTWORDS` / `_HOTWORDS_LIMIT` / `_HOTWORD_WEIGHT`, KenLM via `SHEPTUN_GIGAAM_LM_PATH` (+ `_LM_ALPHA` 0.3, `_LM_BETA` 1.0, `_LM_UNK_OFFSET` -5). Best on the 100-phrase testset: LM + 652 hotwords, weight 30 → CER 7%/9%, EPI 49%, ~95ms (greedy 9%/11%, EPI 31%) (see `docs/asr-benchmark-2026-09.md`).
+GigaAM beam search (mlx + CTC only): `SHEPTUN_GIGAAM_HOTWORDS` / `_HOTWORDS_LIMIT` / `_HOTWORD_WEIGHT`, KenLM via `SHEPTUN_GIGAAM_LM_PATH` (+ `_LM_ALPHA` 0.3, `_LM_BETA` 1.0, `_LM_UNK_OFFSET` -5); phrases longer than `SHEPTUN_GIGAAM_SPLIT_SECONDS` (10) are beam-searched piece by piece between pauses — the pure-Python search grows faster than the audio (19s: ~490ms → ~200ms, +0.6pp CER on those). Best on the 100-phrase testset: LM + 652 hotwords, weight 30 → CER 7%/9%, EPI 49%, ~95ms (greedy 9%/11%, EPI 31%) (see `docs/asr-benchmark-2026-09.md`).
 
 Term tagger: `SHEPTUN_TAGGER_PATH=models/term-tagger` (+ `SHEPTUN_TAGGER_THRESHOLD` 0.5) — a 2.3M-param MLX network that picks a term from the replacement values for each ASR-mangled word (~1ms/phrase). Retrain after new replacement rules.
 

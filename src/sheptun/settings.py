@@ -129,6 +129,8 @@ class Settings:
     gigaam_hotwords_limit: int = int(_get_float("SHEPTUN_GIGAAM_HOTWORDS_LIMIT", 200))
     gigaam_hotword_weight: float = _get_float("SHEPTUN_GIGAAM_HOTWORD_WEIGHT", 20.0)
     gigaam_beam_width: int = int(_get_float("SHEPTUN_GIGAAM_BEAM_WIDTH", 50))
+    # Longer phrases are beam-searched piece by piece between pauses (0 = never split)
+    gigaam_split_seconds: float = _get_float("SHEPTUN_GIGAAM_SPLIT_SECONDS", 10.0)
     # KenLM n-gram LM in the same beam search (mlx + CTC only); build with `sheptun build-lm`
     gigaam_lm_path: str | None = _get_optional_str("SHEPTUN_GIGAAM_LM_PATH")
     gigaam_lm_alpha: float = _get_float("SHEPTUN_GIGAAM_LM_ALPHA", 0.3)

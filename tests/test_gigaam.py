@@ -2,10 +2,11 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
 import pytest
 
 from sheptun.benchmark import _compute_epi
-from sheptun.gigaam import load_hotwords
+from sheptun.gigaam import load_hotwords, split_at_pauses
 
 
 def _write_replacements(path: Path, rules: dict[str, str]) -> None:
@@ -59,3 +60,21 @@ class TestComputeEpi:
 
     def test_no_latin_terms_is_not_scored(self) -> None:
         assert _compute_epi("Открой терминал", "Открой терминал") is None
+
+
+class TestSplitAtPauses:
+    BLANK = 2
+
+    def _frames(self, labels: list[int]) -> np.ndarray:
+        frames = np.full((len(labels), 3), -10.0)
+        frames[np.arange(len(labels)), labels] = 0.0
+        return frames
+
+    def test_cuts_in_the_middle_of_long_pauses(self) -> None:
+        labels = [0, 1] + [self.BLANK] * 10 + [1, 0]
+        parts = split_at_pauses(self._frames(labels), self.BLANK)
+        assert [len(p) for p in parts] == [7, 7]
+
+    def test_short_pauses_stay_whole(self) -> None:
+        labels = [0] + [self.BLANK] * 3 + [1]
+        assert len(split_at_pauses(self._frames(labels), self.BLANK)) == 1

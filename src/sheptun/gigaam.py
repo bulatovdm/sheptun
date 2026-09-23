@@ -2,6 +2,7 @@ import logging
 import re
 import threading
 import time
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -16,6 +17,9 @@ logger = logging.getLogger("sheptun")
 _SAMPLE_RATE = 16000
 _WARMUP_SILENCE_FRAMES = 1600
 _LATIN_TERM = re.compile(r"[A-Za-z][\w.+#/-]*")
+_FRAMES_PER_SECOND = 25
+# Blank run long enough to be a pause between words (~0.3s)
+_MIN_PAUSE_FRAMES = 8
 
 
 def load_hotwords(limit: int) -> list[str]:
@@ -63,11 +67,28 @@ def load_language_model() -> Any:
     )
 
 
+def split_at_pauses(log_probs: np.ndarray[Any, Any], blank: int) -> list[np.ndarray[Any, Any]]:
+    """Cut CTC frames in the middle of every pause (a run of blank frames)."""
+    is_blank = log_probs.argmax(axis=1) == blank
+    cuts: list[int] = []
+    run_start: int | None = None
+    for i, blank_frame in enumerate(is_blank):
+        if blank_frame and run_start is None:
+            run_start = i
+        elif not blank_frame and run_start is not None:
+            if i - run_start >= _MIN_PAUSE_FRAMES:
+                cuts.append((run_start + i) // 2)
+            run_start = None
+    bounds = [0, *cuts, len(log_probs)]
+    return [log_probs[start:end] for start, end in pairwise(bounds)]
+
+
 class _BeamDecoder:
     """CTC beam search с бустом терминов и n-gram LM: 'Gid Comiт' → 'Git commit'.
 
-    Hotwords в одиночку стоят ~160ms на фразу; LM отсекает лишние гипотезы, и вместе они
-    укладываются в ~20ms.
+    Поиск на чистом Python дорожает быстрее длины фразы (19 с звука — ~0,3 с декодинга),
+    поэтому длинные фразы декодируются кусками между паузами: в 3,5 раза быстрее ценой
+    ~0,6 п.п. CER на них — на стыке LM теряет контекст.
     """
 
     def __init__(self, tokenizer: Any, hotwords: list[str], language_model: Any) -> None:
@@ -82,8 +103,16 @@ class _BeamDecoder:
         labels = [tokenizer.id_to_piece(i) for i in range(tokenizer.get_piece_size())] + [""]
         self._decoder = BeamSearchDecoderCTC(Alphabet.build_alphabet(labels), language_model)
         self._hotwords = hotwords
+        self._blank = len(labels) - 1
 
     def decode(self, log_probs: np.ndarray[Any, Any]) -> str:
+        split_frames = settings.gigaam_split_seconds * _FRAMES_PER_SECOND
+        if not split_frames or len(log_probs) <= split_frames:
+            return self._decode(log_probs)
+        parts = (self._decode(part) for part in split_at_pauses(log_probs, self._blank))
+        return " ".join(part for part in parts if part)
+
+    def _decode(self, log_probs: np.ndarray[Any, Any]) -> str:
         text = self._decoder.decode(
             log_probs,
             beam_width=settings.gigaam_beam_width,
