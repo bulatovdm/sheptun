@@ -1314,6 +1314,9 @@ def _save_testset_wav(path: Path, audio_bytes: bytes) -> float:
     return duration
 
 
+_CTRL_C = "\x03"
+
+
 def _wait_key(prompt: str, accepted: set[str] | None = None) -> str:
     """Ждать нажатия клавиши с подавлением ввода (не попадает в терминал/Sheptun).
 
@@ -1327,8 +1330,22 @@ def _wait_key(prompt: str, accepted: set[str] | None = None) -> str:
 
     result: list[str] = []
     done = threading.Event()
+    cancelled = threading.Event()
+    ctrl_keys = {keyboard.Key.ctrl, keyboard.Key.ctrl_l, keyboard.Key.ctrl_r}
+    ctrl_held: set[keyboard.Key | keyboard.KeyCode] = set()
+
+    def cancel() -> bool:
+        cancelled.set()
+        done.set()
+        return False
 
     def on_press(key: keyboard.Key | keyboard.KeyCode | None) -> bool | None:
+        if key in ctrl_keys:
+            ctrl_held.add(key)
+            return None
+        if key == keyboard.Key.esc:
+            return cancel()
+
         char = ""
         if key == keyboard.Key.enter or key == keyboard.Key.space:
             char = ""
@@ -1337,17 +1354,27 @@ def _wait_key(prompt: str, accepted: set[str] | None = None) -> str:
         else:
             return None  # игнорировать служебные клавиши
 
+        # suppress=True глотает Ctrl+C до терминала, поэтому ловим его сами
+        if char == _CTRL_C or (ctrl_held and char == "c"):
+            return cancel()
+
         if accepted is None or char in accepted:
             result.append(char)
             done.set()
             return False  # остановить listener
         return None
 
+    def on_release(key: keyboard.Key | keyboard.KeyCode | None) -> None:
+        if key is not None:
+            ctrl_held.discard(key)
+
     print(prompt, end="", flush=True)
-    with keyboard.Listener(on_press=on_press, suppress=True):  # type: ignore[arg-type]
+    with keyboard.Listener(on_press=on_press, on_release=on_release, suppress=True):  # type: ignore[arg-type]
         done.wait()
 
     print()  # перенос строки после нажатия
+    if cancelled.is_set():
+        raise KeyboardInterrupt
     return result[0] if result else ""
 
 
@@ -1365,9 +1392,10 @@ def _record_phrase(phrase_id: str, text: str, note: str, out_path: Path) -> bool
 
         recorder = AudioRecorder()
         recorder.start()
-        _wait_key("  ● Запись... нажмите Enter или пробел чтобы остановить")
-
-        audio_bytes = recorder.stop()
+        try:
+            _wait_key("  ● Запись... нажмите Enter или пробел чтобы остановить")
+        finally:
+            audio_bytes = recorder.stop()
         duration = (
             len(audio_bytes) // (_TESTSET_SAMPLE_WIDTH * _TESTSET_CHANNELS) / _TESTSET_SAMPLE_RATE
         )
@@ -1463,27 +1491,32 @@ def record_testset(
     saved = 0
     skipped = 0
 
-    for i, entry in enumerate(entries, start=1):
-        if i < start_from:
-            continue
+    try:
+        for i, entry in enumerate(entries, start=1):
+            if i < start_from:
+                continue
 
-        phrase_id = entry.get("id", "")
-        text = entry.get("text", "")
-        category = entry.get("category", "")
-        note = entry.get("note", "")
-        out_path = tdir / f"{phrase_id}.wav"
+            phrase_id = entry.get("id", "")
+            text = entry.get("text", "")
+            category = entry.get("category", "")
+            note = entry.get("note", "")
+            out_path = tdir / f"{phrase_id}.wav"
 
-        if skip_existing and out_path.exists():
-            _hint(f"[{i}/{total}] Пропущено (уже есть): {phrase_id}")
-            skipped += 1
-            continue
+            if skip_existing and out_path.exists():
+                _hint(f"[{i}/{total}] Пропущено (уже есть): {phrase_id}")
+                skipped += 1
+                continue
 
-        console.print(f"[cyan][{i}/{total}][/cyan] [dim]{category}[/dim]")
+            console.print(f"[cyan][{i}/{total}][/cyan] [dim]{category}[/dim]")
 
-        if _record_phrase(phrase_id, text, note, out_path):
-            saved += 1
-        else:
-            skipped += 1
+            if _record_phrase(phrase_id, text, note, out_path):
+                saved += 1
+            else:
+                skipped += 1
+    except KeyboardInterrupt:
+        console.print()
+        _info(f"Прервано: записано {saved}. Продолжить: sheptun record-testset")
+        return
 
     console.print()
     _success(f"Готово: записано {saved}, пропущено {skipped} из {total}")
